@@ -68,14 +68,46 @@ Response includes:
 Authorization: Bearer <accessToken>
 ```
 
+### User Login API (Mobile)
+
+For teachers and parents logging in via the mobile app, use a separate endpoint that checks the `users` collection.
+
+`POST /api/user/login`
+
+- Accepts both `teacher` and `parent` role accounts.
+- The returned `accessToken` works with all protected routes — the token is scoped to the user's organization.
+
+Request body:
+
+```json
+{
+  "email": "teacher@example.com",
+  "password": "password123"
+}
+```
+
+Response includes:
+
+- `message`
+- `accessToken`
+- `user` — `{ uid, name, email, role, organizationId }`
+
 ### cURL examples
 
-Login and get token:
+Organization login:
 
 ```bash
 curl -X POST http://localhost:3000/api/organization/login \
 	-H "Content-Type: application/json" \
 	-d '{"email":"org@mail.com","password":"password123"}'
+```
+
+Teacher / parent login (mobile):
+
+```bash
+curl -X POST http://localhost:3000/api/user/login \
+	-H "Content-Type: application/json" \
+	-d '{"email":"teacher@example.com","password":"password123"}'
 ```
 
 Fetch students by class (Bearer token):
