@@ -1,6 +1,14 @@
 import Link from "next/link";
 
-export function SiteHeader() {
+type SiteHeaderProps = {
+  actionHref?: string;
+  actionLabel?: string;
+};
+
+export function SiteHeader({
+  actionHref = "/login",
+  actionLabel = "Login",
+}: SiteHeaderProps) {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/80 bg-white/65 px-4 py-3 shadow-[0_12px_28px_rgba(16,32,68,0.09)] backdrop-blur-[8px] sm:px-6 lg:px-10 xl:px-16">
       <div className="mx-auto flex w-full max-w-[1160px] items-center justify-between">
@@ -19,9 +27,9 @@ export function SiteHeader() {
         </div>
         <Link
           className="rounded-full border border-[rgba(18,36,76,0.14)] bg-white px-4 py-2 text-sm font-semibold no-underline transition hover:-translate-y-px hover:border-[rgba(20,72,204,0.32)] hover:shadow-[0_12px_24px_rgba(20,72,204,0.17)] max-sm:px-3 max-sm:text-[0.82rem]"
-          href="/login"
+          href={actionHref}
         >
-          Login
+          {actionLabel}
         </Link>
       </div>
     </header>
