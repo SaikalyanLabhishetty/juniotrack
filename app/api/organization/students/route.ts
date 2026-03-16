@@ -12,12 +12,15 @@ type StudentDocument = {
     classId: string;
     parentId: string;
     organizationId: string;
-    parentName: string;
-    parentPhone: string;
-    parentEmail: string;
     address: string;
     photoUrl: string;
     createdAt: string;
+};
+
+type StudentResponse = StudentDocument & {
+    parentName: string;
+    parentPhone: string;
+    parentEmail: string;
 };
 
 type ClassDocument = {
@@ -203,16 +206,31 @@ export async function POST(request: Request) {
 
             await usersCollection.insertOne(newParent);
             parentId = newParent.uid;
-        } else if (!existingParent?.passwordHash) {
-            await usersCollection.updateOne(
-                { uid: existingParent.uid },
-                {
-                    $set: {
-                        passwordHash: hashPassword(formatDobPassword(dob)),
-                        updatedAt: now,
+        } else if (existingParent) {
+            const parentUpdates: Partial<ParentDocument> = {};
+
+            if (existingParent.name !== parentName) {
+                parentUpdates.name = parentName;
+            }
+
+            if (existingParent.phone !== parentPhone) {
+                parentUpdates.phone = parentPhone;
+            }
+
+            if (!existingParent.passwordHash) {
+                parentUpdates.passwordHash = hashPassword(formatDobPassword(dob));
+            }
+
+            if (Object.keys(parentUpdates).length > 0) {
+                parentUpdates.updatedAt = now;
+
+                await usersCollection.updateOne(
+                    { uid: existingParent.uid },
+                    {
+                        $set: parentUpdates,
                     },
-                },
-            );
+                );
+            }
         }
 
         const studentRecord: StudentDocument = {
@@ -223,9 +241,6 @@ export async function POST(request: Request) {
             classId,
             parentId,
             organizationId: tokenPayload.uid,
-            parentName,
-            parentPhone,
-            parentEmail,
             address,
             photoUrl: "",
             createdAt: now,
@@ -239,6 +254,9 @@ export async function POST(request: Request) {
                 student: {
                     _id: result.insertedId.toHexString(),
                     ...studentRecord,
+                    parentName,
+                    parentPhone,
+                    parentEmail,
                 },
             },
             { status: 201 },
@@ -266,6 +284,7 @@ export async function GET(request: Request) {
         const studentsCollection = database.collection<StudentDocument>(
             STUDENTS_COLLECTION,
         );
+        const usersCollection = database.collection<ParentDocument>(USERS_COLLECTION);
 
         const students = await studentsCollection
             .find(
@@ -280,9 +299,6 @@ export async function GET(request: Request) {
                         classId: 1,
                         parentId: 1,
                         organizationId: 1,
-                        parentName: 1,
-                        parentPhone: 1,
-                        parentEmail: 1,
                         address: 1,
                         photoUrl: 1,
                         createdAt: 1,
@@ -292,7 +308,40 @@ export async function GET(request: Request) {
             .sort({ createdAt: -1 })
             .toArray();
 
-        return NextResponse.json({ students });
+        const parentIds = [...new Set(students.map((student) => student.parentId).filter(Boolean))];
+        const parents = parentIds.length
+            ? await usersCollection
+                  .find(
+                      {
+                          organizationId: tokenPayload.uid,
+                          role: "parent",
+                          uid: { $in: parentIds },
+                      },
+                      {
+                          projection: {
+                              uid: 1,
+                              name: 1,
+                              phone: 1,
+                              email: 1,
+                          },
+                      },
+                  )
+                  .toArray()
+            : [];
+
+        const parentMap = new Map(parents.map((parent) => [parent.uid, parent]));
+        const studentsWithParents: StudentResponse[] = students.map((student) => {
+            const parent = parentMap.get(student.parentId);
+
+            return {
+                ...student,
+                parentName: parent?.name ?? "",
+                parentPhone: parent?.phone ?? "",
+                parentEmail: parent?.email ?? "",
+            };
+        });
+
+        return NextResponse.json({ students: studentsWithParents });
     } catch (error) {
         const message =
             error instanceof Error ? error.message : "Unable to fetch students.";

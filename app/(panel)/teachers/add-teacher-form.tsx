@@ -357,7 +357,7 @@ export function AddTeacherForm() {
                 <div className="sm:col-span-2">
                     <p className="text-sm font-medium text-[#243552]">Classes</p>
                     <div
-                        className={`mt-2 rounded-[1rem] border bg-white p-4 ${isLoadingClasses || classes.length === 0
+                        className={`mt-2 rounded-2xl border bg-white p-4 ${isLoadingClasses || classes.length === 0
                             ? "border-[rgba(18,36,76,0.08)] bg-[#f8fbff]"
                             : "border-[rgba(18,36,76,0.12)]"
                             }`}
@@ -385,7 +385,7 @@ export function AddTeacherForm() {
                                     {filteredClasses.map((classItem) => (
                                         <label
                                             key={classItem.uid}
-                                            className="flex cursor-pointer items-center gap-3 rounded-[0.75rem] px-3 py-2 transition hover:bg-[#f5f7fb]"
+                                            className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 transition hover:bg-[#f5f7fb]"
                                         >
                                             <input
                                                 type="checkbox"

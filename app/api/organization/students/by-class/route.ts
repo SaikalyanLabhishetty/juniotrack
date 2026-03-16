@@ -20,16 +20,29 @@ type StudentDocument = {
     classId: string;
     parentId: string;
     organizationId: string;
-    parentName: string;
-    parentPhone: string;
-    parentEmail: string;
     address: string;
     photoUrl: string;
     createdAt: string;
 };
 
+type ParentDocument = {
+    uid: string;
+    name: string;
+    phone: string;
+    email: string;
+    role: "parent";
+    organizationId: string;
+};
+
+type StudentResponse = StudentDocument & {
+    parentName: string;
+    parentPhone: string;
+    parentEmail: string;
+};
+
 const CLASSES_COLLECTION = "classes";
 const STUDENTS_COLLECTION = "students";
+const USERS_COLLECTION = "users";
 
 function normalizeString(value: unknown) {
     return typeof value === "string" ? value.trim() : "";
@@ -82,6 +95,7 @@ export async function GET(request: NextRequest) {
         const studentsCollection = database.collection<StudentDocument>(
             STUDENTS_COLLECTION,
         );
+        const usersCollection = database.collection<ParentDocument>(USERS_COLLECTION);
 
         let classRecord: ClassDocument | null = null;
 
@@ -136,9 +150,6 @@ export async function GET(request: NextRequest) {
                         classId: 1,
                         parentId: 1,
                         organizationId: 1,
-                        parentName: 1,
-                        parentPhone: 1,
-                        parentEmail: 1,
                         address: 1,
                         photoUrl: 1,
                         createdAt: 1,
@@ -147,6 +158,39 @@ export async function GET(request: NextRequest) {
             )
             .sort({ enrollmentNumber: 1 })
             .toArray();
+
+        const parentIds = [...new Set(students.map((student) => student.parentId).filter(Boolean))];
+        const parents = parentIds.length
+            ? await usersCollection
+                  .find(
+                      {
+                          organizationId: tokenPayload.uid,
+                          role: "parent",
+                          uid: { $in: parentIds },
+                      },
+                      {
+                          projection: {
+                              uid: 1,
+                              name: 1,
+                              phone: 1,
+                              email: 1,
+                          },
+                      },
+                  )
+                  .toArray()
+            : [];
+
+        const parentMap = new Map(parents.map((parent) => [parent.uid, parent]));
+        const studentsWithParents: StudentResponse[] = students.map((student) => {
+            const parent = parentMap.get(student.parentId);
+
+            return {
+                ...student,
+                parentName: parent?.name ?? "",
+                parentPhone: parent?.phone ?? "",
+                parentEmail: parent?.email ?? "",
+            };
+        });
 
         return NextResponse.json({
             class: {
@@ -158,7 +202,7 @@ export async function GET(request: NextRequest) {
                 academicYear: classRecord.academicYear,
                 createdAt: classRecord.createdAt,
             },
-            students,
+            students: studentsWithParents,
         });
     } catch (error) {
         const message =

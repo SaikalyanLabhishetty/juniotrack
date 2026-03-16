@@ -1,9 +1,9 @@
-import { AddTeacherForm } from "../academics/add-teacher-form";
+import { AddTeacherForm } from "./add-teacher-form";
 
 export default function TeachersPage() {
     return (
         <div className="mt-6">
-            <section className="rounded-[1.5rem] border border-[rgba(18,36,76,0.08)] bg-white/90 p-6 shadow-[0_16px_40px_rgba(16,32,68,0.06)] backdrop-blur-[6px] sm:p-8">
+            <section className="rounded-3xl border border-[rgba(18,36,76,0.08)] bg-white/90 p-6 shadow-[0_16px_40px_rgba(16,32,68,0.06)] backdrop-blur-[6px] sm:p-8">
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-[#0f1f3a]">
                     Teachers
                 </h2>
