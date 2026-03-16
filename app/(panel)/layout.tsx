@@ -28,8 +28,28 @@ const navItems = [
         ),
     },
     {
-        label: "Users",
-        href: "/users",
+        label: "Classes",
+        href: "/classes",
+        icon: (
+            <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-[18px] w-[18px]"
+                aria-hidden
+            >
+                <path d="M2 7l10-4 10 4-10 4-10-4z" />
+                <path d="M6 10.5V15c0 1.4 2.7 3 6 3s6-1.6 6-3v-4.5" />
+                <path d="M22 9v6" />
+            </svg>
+        ),
+    },
+    {
+        label: "Teachers",
+        href: "/teachers",
         icon: (
             <svg
                 viewBox="0 0 24 24"
@@ -49,8 +69,8 @@ const navItems = [
         ),
     },
     {
-        label: "Academics",
-        href: "/academics",
+        label: "Students",
+        href: "/students",
         icon: (
             <svg
                 viewBox="0 0 24 24"
@@ -79,9 +99,10 @@ export default function DashboardLayout({
 
     const routeTitles: Record<string, { title: string; subtitle: string }> = {
         "/dashboard": { title: "Overview", subtitle: "Welcome back. Here is your organization's summary." },
-        "/users": { title: "Users", subtitle: "Add and manage teachers and parents in your organization." },
+        "/classes": { title: "Classes", subtitle: "Add and manage class sections for your organization." },
+        "/teachers": { title: "Teachers", subtitle: "Add and manage teacher records." },
+        "/students": { title: "Students", subtitle: "Add and manage student records." },
         "/profile": { title: "Organization Profile", subtitle: "Manage your organization settings and security." },
-        "/academics": { title: "Academics", subtitle: "Manage classes, subjects, and academic terms." },
     };
 
     const currentRouteInfo = Object.entries(routeTitles).find(([route]) =>

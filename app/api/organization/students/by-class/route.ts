@@ -15,10 +15,15 @@ type ClassDocument = {
 type StudentDocument = {
     uid: string;
     name: string;
-    rollNumber: number;
+    dob: string;
+    enrollmentNumber: string;
     classId: string;
     parentId: string;
     organizationId: string;
+    parentName: string;
+    parentPhone: string;
+    parentEmail: string;
+    address: string;
     photoUrl: string;
     createdAt: string;
 };
@@ -126,16 +131,21 @@ export async function GET(request: NextRequest) {
                         _id: 1,
                         uid: 1,
                         name: 1,
-                        rollNumber: 1,
+                        dob: 1,
+                        enrollmentNumber: 1,
                         classId: 1,
                         parentId: 1,
                         organizationId: 1,
+                        parentName: 1,
+                        parentPhone: 1,
+                        parentEmail: 1,
+                        address: 1,
                         photoUrl: 1,
                         createdAt: 1,
                     },
                 },
             )
-            .sort({ rollNumber: 1 })
+            .sort({ enrollmentNumber: 1 })
             .toArray();
 
         return NextResponse.json({

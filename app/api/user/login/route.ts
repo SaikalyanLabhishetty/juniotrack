@@ -8,6 +8,8 @@ import { getDatabase } from "@/lib/mongodb";
 
 type LoginPayload = {
   email?: string;
+  phone?: string;
+  identifier?: string;
   password?: string;
 };
 
@@ -26,6 +28,7 @@ type UserDocument = {
 
 const COLLECTION_NAME = "users";
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const phonePattern = /^\d{10}$/;
 
 function normalizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -34,13 +37,19 @@ function normalizeString(value: unknown) {
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as LoginPayload;
-    const email = normalizeString(payload.email).toLowerCase();
+    const rawIdentifier = normalizeString(
+      payload.identifier ?? payload.email ?? payload.phone,
+    );
+    const isEmail = emailPattern.test(rawIdentifier);
+    const isPhone = phonePattern.test(rawIdentifier);
+    const email = isEmail ? rawIdentifier.toLowerCase() : "";
+    const phone = isPhone ? rawIdentifier : "";
     const password = normalizeString(payload.password);
 
     const fieldErrors: Record<string, string> = {};
 
-    if (!emailPattern.test(email)) {
-      fieldErrors.email = "Enter a valid email address.";
+    if (!isEmail && !isPhone) {
+      fieldErrors.email = "Enter a valid email address or phone number.";
     }
 
     if (password.length < 8) {
@@ -59,7 +68,7 @@ export async function POST(request: Request) {
 
     const database = await getDatabase();
     const collection = database.collection<UserDocument>(COLLECTION_NAME);
-    const user = await collection.findOne({ email });
+    const user = await collection.findOne(isPhone ? { phone } : { email });
 
     if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) {
       return NextResponse.json(

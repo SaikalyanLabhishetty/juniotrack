@@ -12,8 +12,13 @@ type ClassOption = {
 
 type AddStudentFormData = {
     name: string;
-    rollNumber: string;
     classId: string;
+    dob: string;
+    enrollmentNumber: string;
+    parentName: string;
+    parentPhone: string;
+    parentEmail: string;
+    address: string;
 };
 
 type FormFieldErrors = Partial<Record<keyof AddStudentFormData, string>>;
@@ -30,8 +35,13 @@ const errorTextClassName = "mt-2 text-xs font-medium text-[#b42318]";
 
 const initialFormData: AddStudentFormData = {
     name: "",
-    rollNumber: "",
     classId: "",
+    dob: "",
+    enrollmentNumber: "",
+    parentName: "",
+    parentPhone: "",
+    parentEmail: "",
+    address: "",
 };
 
 function validateField(
@@ -46,12 +56,28 @@ function validateField(
         return "Class is required.";
     }
 
-    if (name === "rollNumber") {
-        const numberValue = Number(value);
+    if (name === "dob" && !value.trim()) {
+        return "Date of birth is required.";
+    }
 
-        if (!Number.isInteger(numberValue) || numberValue <= 0) {
-            return "Roll number must be a positive integer.";
-        }
+    if (name === "enrollmentNumber" && !value.trim()) {
+        return "Enrollment number is required.";
+    }
+
+    if (name === "parentName" && !value.trim()) {
+        return "Parent name is required.";
+    }
+
+    if (name === "parentPhone" && !/^\d{10}$/.test(value)) {
+        return "Phone number must be exactly 10 digits.";
+    }
+
+    if (name === "parentEmail" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+        return "Enter a valid email address.";
+    }
+
+    if (name === "address" && !value.trim()) {
+        return "Address is required.";
     }
 
     return undefined;
@@ -121,8 +147,12 @@ export function AddStudentForm() {
         const fieldName = name as keyof AddStudentFormData;
         let nextValue = value;
 
-        if (fieldName === "rollNumber") {
-            nextValue = nextValue.replace(/\D/g, "").slice(0, 4);
+        if (fieldName === "parentPhone") {
+            nextValue = nextValue.replace(/\D/g, "").slice(0, 10);
+        }
+
+        if (fieldName === "enrollmentNumber") {
+            nextValue = nextValue.replace(/\s/g, "");
         }
 
         setFormData((current) => ({
@@ -146,7 +176,15 @@ export function AddStudentForm() {
         const nextFieldErrors: FormFieldErrors = {
             name: validateField("name", formData.name),
             classId: validateField("classId", formData.classId),
-            rollNumber: validateField("rollNumber", formData.rollNumber),
+            dob: validateField("dob", formData.dob),
+            enrollmentNumber: validateField(
+                "enrollmentNumber",
+                formData.enrollmentNumber,
+            ),
+            parentName: validateField("parentName", formData.parentName),
+            parentPhone: validateField("parentPhone", formData.parentPhone),
+            parentEmail: validateField("parentEmail", formData.parentEmail),
+            address: validateField("address", formData.address),
         };
 
         setFieldErrors(nextFieldErrors);
@@ -168,10 +206,7 @@ export function AddStudentForm() {
                     "Content-Type": "application/json",
                     ...getAuthorizationHeader(),
                 },
-                body: JSON.stringify({
-                    ...formData,
-                    rollNumber: Number(formData.rollNumber),
-                }),
+                body: JSON.stringify(formData),
             });
 
             const responseData = (await response.json()) as AddStudentResponse;
@@ -199,7 +234,7 @@ export function AddStudentForm() {
             setStatus({
                 tone: "success",
                 message:
-                    responseData.message || "Student added to class successfully.",
+                    responseData.message || "Student added successfully.",
             });
         } catch {
             setStatus({
@@ -232,19 +267,33 @@ export function AddStudentForm() {
                 </label>
 
                 <label className="block text-sm font-medium text-[#243552]">
-                    Roll Number
+                    Date of Birth
                     <input
                         className={inputClassName}
-                        name="rollNumber"
-                        type="text"
-                        value={formData.rollNumber}
+                        name="dob"
+                        type="date"
+                        value={formData.dob}
                         onChange={handleChange}
-                        placeholder="Enter roll number"
-                        inputMode="numeric"
                         required
                     />
-                    {fieldErrors.rollNumber ? (
-                        <p className={errorTextClassName}>{fieldErrors.rollNumber}</p>
+                    {fieldErrors.dob ? (
+                        <p className={errorTextClassName}>{fieldErrors.dob}</p>
+                    ) : null}
+                </label>
+
+                <label className="block text-sm font-medium text-[#243552]">
+                    Enrollment Number
+                    <input
+                        className={inputClassName}
+                        name="enrollmentNumber"
+                        type="text"
+                        value={formData.enrollmentNumber}
+                        onChange={handleChange}
+                        placeholder="Enter enrollment number"
+                        required
+                    />
+                    {fieldErrors.enrollmentNumber ? (
+                        <p className={errorTextClassName}>{fieldErrors.enrollmentNumber}</p>
                     ) : null}
                 </label>
 
@@ -273,6 +322,73 @@ export function AddStudentForm() {
                     </select>
                     {fieldErrors.classId ? (
                         <p className={errorTextClassName}>{fieldErrors.classId}</p>
+                    ) : null}
+                </label>
+
+                <label className="block text-sm font-medium text-[#243552]">
+                    Parent Name
+                    <input
+                        className={inputClassName}
+                        name="parentName"
+                        type="text"
+                        value={formData.parentName}
+                        onChange={handleChange}
+                        placeholder="Enter parent name"
+                        required
+                    />
+                    {fieldErrors.parentName ? (
+                        <p className={errorTextClassName}>{fieldErrors.parentName}</p>
+                    ) : null}
+                </label>
+
+                <label className="block text-sm font-medium text-[#243552]">
+                    Parent Phone
+                    <input
+                        className={inputClassName}
+                        name="parentPhone"
+                        type="tel"
+                        value={formData.parentPhone}
+                        onChange={handleChange}
+                        placeholder="Enter parent phone"
+                        inputMode="numeric"
+                        maxLength={10}
+                        required
+                    />
+                    {fieldErrors.parentPhone ? (
+                        <p className={errorTextClassName}>{fieldErrors.parentPhone}</p>
+                    ) : null}
+                </label>
+
+                <label className="block text-sm font-medium text-[#243552]">
+                    Parent Email
+                    <input
+                        className={inputClassName}
+                        name="parentEmail"
+                        type="email"
+                        value={formData.parentEmail}
+                        onChange={handleChange}
+                        placeholder="Enter parent email"
+                        autoComplete="email"
+                        required
+                    />
+                    {fieldErrors.parentEmail ? (
+                        <p className={errorTextClassName}>{fieldErrors.parentEmail}</p>
+                    ) : null}
+                </label>
+
+                <label className="block text-sm font-medium text-[#243552] sm:col-span-2">
+                    Address
+                    <input
+                        className={inputClassName}
+                        name="address"
+                        type="text"
+                        value={formData.address}
+                        onChange={handleChange}
+                        placeholder="Enter parent address"
+                        required
+                    />
+                    {fieldErrors.address ? (
+                        <p className={errorTextClassName}>{fieldErrors.address}</p>
                     ) : null}
                 </label>
             </div>

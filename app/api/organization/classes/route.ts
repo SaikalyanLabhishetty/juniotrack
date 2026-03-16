@@ -3,12 +3,6 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getDatabase } from "@/lib/mongodb";
 import { verifyAccessToken } from "@/lib/verify-access-token";
 
-type UserDocument = {
-    uid: string;
-    role: "teacher" | "parent";
-    organizationId: string;
-};
-
 type ClassDocument = {
     uid: string;
     className: string;
@@ -27,7 +21,6 @@ type CreateClassPayload = {
 };
 
 const CLASSES_COLLECTION = "classes";
-const USERS_COLLECTION = "users";
 const sectionPattern = /^[A-Z]+$/;
 
 function normalizeString(value: unknown) {
@@ -127,10 +120,6 @@ export async function POST(request: Request) {
             fieldErrors.section = "Section must contain only alphabets (A-Z).";
         }
 
-        if (!teacherId) {
-            fieldErrors.teacherId = "Class teacher is required.";
-        }
-
         if (!isValidAcademicYear(academicYear)) {
             fieldErrors.academicYear = "Academic year must be in YYYY-YYYY format (e.g. 2025-2026).";
         }
@@ -143,26 +132,7 @@ export async function POST(request: Request) {
         }
 
         const database = await getDatabase();
-        const usersCollection = database.collection<UserDocument>(USERS_COLLECTION);
         const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
-
-        const teacher = await usersCollection.findOne({
-            uid: teacherId,
-            role: "teacher",
-            organizationId: tokenPayload.uid,
-        });
-
-        if (!teacher) {
-            return NextResponse.json(
-                {
-                    message: "Selected teacher does not exist.",
-                    fieldErrors: {
-                        teacherId: "Select a valid teacher from this organization.",
-                    },
-                },
-                { status: 400 },
-            );
-        }
 
         const existingClass = await classesCollection.findOne({
             className,

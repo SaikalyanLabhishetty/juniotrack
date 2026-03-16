@@ -1,15 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/mongodb";
+import { hashPassword } from "@/lib/organization-auth";
 import { verifyAccessToken } from "@/lib/verify-access-token";
 
 type StudentDocument = {
     uid: string;
     name: string;
-    rollNumber: number;
+    dob: string;
+    enrollmentNumber: string;
     classId: string;
     parentId: string;
     organizationId: string;
+    parentName: string;
+    parentPhone: string;
+    parentEmail: string;
+    address: string;
     photoUrl: string;
     createdAt: string;
 };
@@ -19,35 +25,53 @@ type ClassDocument = {
     organizationId: string;
 };
 
+type ParentDocument = {
+    uid: string;
+    name: string;
+    phone: string;
+    email: string;
+    passwordHash?: string;
+    role: "parent";
+    organizationId: string;
+    status: "active";
+    createdAt: string;
+    updatedAt: string;
+};
+
 type CreateStudentPayload = {
     name?: string;
-    rollNumber?: number | string;
+    dob?: string;
+    enrollmentNumber?: string;
     classId?: string;
+    parentName?: string;
+    parentPhone?: string;
+    parentEmail?: string;
+    address?: string;
 };
 
 const STUDENTS_COLLECTION = "students";
 const CLASSES_COLLECTION = "classes";
+const USERS_COLLECTION = "users";
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const phonePattern = /^\d{10}$/;
 
 function normalizeString(value: unknown) {
     return typeof value === "string" ? value.trim() : "";
 }
 
-function parseRollNumber(value: unknown) {
-    if (typeof value === "number") {
-        return Number.isInteger(value) ? value : Number.NaN;
+function formatDobPassword(value: string) {
+    const trimmed = value.trim();
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+        return `${isoMatch[3]}${isoMatch[2]}${isoMatch[1]}`;
     }
 
-    if (typeof value === "string") {
-        const trimmed = value.trim();
-
-        if (!trimmed) {
-            return Number.NaN;
-        }
-
-        return Number(trimmed);
+    const digits = trimmed.replace(/\D/g, "");
+    if (digits.length === 8) {
+        return digits;
     }
 
-    return Number.NaN;
+    return digits;
 }
 
 export async function POST(request: Request) {
@@ -64,8 +88,13 @@ export async function POST(request: Request) {
         const payload = (await request.json()) as CreateStudentPayload;
 
         const name = normalizeString(payload.name);
+        const dob = normalizeString(payload.dob);
+        const enrollmentNumber = normalizeString(payload.enrollmentNumber);
         const classId = normalizeString(payload.classId);
-        const rollNumber = parseRollNumber(payload.rollNumber);
+        const parentName = normalizeString(payload.parentName);
+        const parentPhone = normalizeString(payload.parentPhone);
+        const parentEmail = normalizeString(payload.parentEmail).toLowerCase();
+        const address = normalizeString(payload.address);
 
         const fieldErrors: Record<string, string> = {};
 
@@ -73,12 +102,32 @@ export async function POST(request: Request) {
             fieldErrors.name = "Student name is required.";
         }
 
+        if (!dob) {
+            fieldErrors.dob = "Date of birth is required.";
+        }
+
+        if (!enrollmentNumber) {
+            fieldErrors.enrollmentNumber = "Enrollment number is required.";
+        }
+
         if (!classId) {
             fieldErrors.classId = "Class is required.";
         }
 
-        if (!Number.isInteger(rollNumber) || rollNumber <= 0) {
-            fieldErrors.rollNumber = "Roll number must be a positive integer.";
+        if (!parentName) {
+            fieldErrors.parentName = "Parent name is required.";
+        }
+
+        if (!phonePattern.test(parentPhone)) {
+            fieldErrors.parentPhone = "Phone number must be exactly 10 digits.";
+        }
+
+        if (!emailPattern.test(parentEmail)) {
+            fieldErrors.parentEmail = "Enter a valid email address.";
+        }
+
+        if (!address) {
+            fieldErrors.address = "Address is required.";
         }
 
         if (Object.keys(fieldErrors).length > 0) {
@@ -93,6 +142,7 @@ export async function POST(request: Request) {
         const studentsCollection = database.collection<StudentDocument>(
             STUDENTS_COLLECTION,
         );
+        const usersCollection = database.collection<ParentDocument>(USERS_COLLECTION);
 
         const classRecord = await classesCollection.findOne({
             uid: classId,
@@ -109,40 +159,83 @@ export async function POST(request: Request) {
             );
         }
 
-        const existingRollNumber = await studentsCollection.findOne({
+        const existingEnrollment = await studentsCollection.findOne({
             classId,
-            rollNumber,
+            enrollmentNumber,
             organizationId: tokenPayload.uid,
         });
 
-        if (existingRollNumber) {
+        if (existingEnrollment) {
             return NextResponse.json(
                 {
-                    message: "Roll number already exists in this class.",
+                    message: "Enrollment number already exists in this class.",
                     fieldErrors: {
-                        rollNumber: "This roll number is already assigned in the selected class.",
+                        enrollmentNumber:
+                            "This enrollment number is already assigned in the selected class.",
                     },
                 },
                 { status: 409 },
             );
         }
 
+        const now = new Date().toISOString();
+        const existingParent = await usersCollection.findOne({
+            organizationId: tokenPayload.uid,
+            role: "parent",
+            email: parentEmail,
+        });
+
+        let parentId = existingParent?.uid ?? "";
+
+        if (!parentId) {
+            const newParent: ParentDocument = {
+                uid: randomUUID(),
+                name: parentName,
+                phone: parentPhone,
+                email: parentEmail,
+                passwordHash: hashPassword(formatDobPassword(dob)),
+                role: "parent",
+                organizationId: tokenPayload.uid,
+                status: "active",
+                createdAt: now,
+                updatedAt: now,
+            };
+
+            await usersCollection.insertOne(newParent);
+            parentId = newParent.uid;
+        } else if (!existingParent?.passwordHash) {
+            await usersCollection.updateOne(
+                { uid: existingParent.uid },
+                {
+                    $set: {
+                        passwordHash: hashPassword(formatDobPassword(dob)),
+                        updatedAt: now,
+                    },
+                },
+            );
+        }
+
         const studentRecord: StudentDocument = {
             uid: randomUUID(),
             name,
-            rollNumber,
+            dob,
+            enrollmentNumber,
             classId,
-            parentId: "",
+            parentId,
             organizationId: tokenPayload.uid,
+            parentName,
+            parentPhone,
+            parentEmail,
+            address,
             photoUrl: "",
-            createdAt: new Date().toISOString().slice(0, 10),
+            createdAt: now,
         };
 
         const result = await studentsCollection.insertOne(studentRecord);
 
         return NextResponse.json(
             {
-                message: "Student added to class successfully.",
+                message: "Student added successfully.",
                 student: {
                     _id: result.insertedId.toHexString(),
                     ...studentRecord,
@@ -153,6 +246,56 @@ export async function POST(request: Request) {
     } catch (error) {
         const message =
             error instanceof Error ? error.message : "Unable to add student.";
+
+        return NextResponse.json({ message }, { status: 500 });
+    }
+}
+
+export async function GET(request: Request) {
+    try {
+        const tokenPayload = await verifyAccessToken(request);
+
+        if (!tokenPayload) {
+            return NextResponse.json(
+                { message: "Unauthorized. Please login again." },
+                { status: 401 },
+            );
+        }
+
+        const database = await getDatabase();
+        const studentsCollection = database.collection<StudentDocument>(
+            STUDENTS_COLLECTION,
+        );
+
+        const students = await studentsCollection
+            .find(
+                { organizationId: tokenPayload.uid },
+                {
+                    projection: {
+                        _id: 1,
+                        uid: 1,
+                        name: 1,
+                        dob: 1,
+                        enrollmentNumber: 1,
+                        classId: 1,
+                        parentId: 1,
+                        organizationId: 1,
+                        parentName: 1,
+                        parentPhone: 1,
+                        parentEmail: 1,
+                        address: 1,
+                        photoUrl: 1,
+                        createdAt: 1,
+                    },
+                },
+            )
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        return NextResponse.json({ students });
+    } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Unable to fetch students.";
 
         return NextResponse.json({ message }, { status: 500 });
     }
