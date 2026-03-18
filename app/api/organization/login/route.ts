@@ -15,6 +15,9 @@ type OrganizationDocument = {
   uid: string;
   email: string;
   passwordHash?: string;
+  schools?: Array<{
+    uid?: string;
+  }>;
 };
 
 const COLLECTION_NAME = "organization";
@@ -63,9 +66,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const schoolId =
+      normalizeString(organization.schools?.[0]?.uid) ||
+      normalizeString(organization.uid);
+
     const accessToken = createAccessToken({
       email: organization.email,
       uid: organization.uid,
+      schoolId: schoolId || undefined,
     });
 
     const response = NextResponse.json(

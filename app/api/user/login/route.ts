@@ -21,6 +21,7 @@ type UserDocument = {
   passwordHash: string;
   role: "teacher" | "parent";
   organizationId: string;
+  schoolId?: string;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -78,9 +79,11 @@ export async function POST(request: Request) {
     }
 
     // Use organizationId as the token uid so all protected org-scoped routes work correctly.
+    const schoolId = normalizeString(user.schoolId);
     const accessToken = createAccessToken({
       email: user.email,
       uid: user.organizationId,
+      schoolId: schoolId || undefined,
     });
 
     const response = NextResponse.json(

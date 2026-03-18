@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getDatabase } from "@/lib/mongodb";
+import { buildSchoolScopeQuery, resolveSchoolId } from "@/lib/organization-school";
 import { verifyAccessToken } from "@/lib/verify-access-token";
 
 type ClassDocument = {
@@ -8,6 +9,7 @@ type ClassDocument = {
     section: string;
     teacherId: string;
     organizationId: string;
+    schoolId: string;
     academicYear: string;
     createdAt: string;
 };
@@ -20,6 +22,7 @@ type StudentDocument = {
     classId: string;
     parentId: string;
     organizationId: string;
+    schoolId: string;
     address: string;
     photoUrl: string;
     createdAt: string;
@@ -32,6 +35,7 @@ type ParentDocument = {
     email: string;
     role: "parent";
     organizationId: string;
+    schoolId: string;
 };
 
 type StudentResponse = StudentDocument & {
@@ -91,6 +95,19 @@ export async function GET(request: NextRequest) {
         }
 
         const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
         const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
         const studentsCollection = database.collection<StudentDocument>(
             STUDENTS_COLLECTION,
@@ -105,6 +122,7 @@ export async function GET(request: NextRequest) {
                 className,
                 section,
                 academicYear,
+                ...buildSchoolScopeQuery(schoolId),
             });
         } else {
             classRecord = await classesCollection.findOne(
@@ -112,6 +130,7 @@ export async function GET(request: NextRequest) {
                     organizationId: tokenPayload.uid,
                     className,
                     section,
+                    ...buildSchoolScopeQuery(schoolId),
                 },
                 {
                     sort: {
@@ -139,6 +158,7 @@ export async function GET(request: NextRequest) {
                 {
                     organizationId: tokenPayload.uid,
                     classId: classRecord.uid,
+                    ...buildSchoolScopeQuery(schoolId),
                 },
                 {
                     projection: {
@@ -150,6 +170,7 @@ export async function GET(request: NextRequest) {
                         classId: 1,
                         parentId: 1,
                         organizationId: 1,
+                        schoolId: 1,
                         address: 1,
                         photoUrl: 1,
                         createdAt: 1,
@@ -167,6 +188,7 @@ export async function GET(request: NextRequest) {
                           organizationId: tokenPayload.uid,
                           role: "parent",
                           uid: { $in: parentIds },
+                          ...buildSchoolScopeQuery(schoolId),
                       },
                       {
                           projection: {
@@ -199,6 +221,7 @@ export async function GET(request: NextRequest) {
                 section: classRecord.section,
                 teacherId: classRecord.teacherId,
                 organizationId: classRecord.organizationId,
+                schoolId: classRecord.schoolId,
                 academicYear: classRecord.academicYear,
                 createdAt: classRecord.createdAt,
             },

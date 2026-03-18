@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/mongodb";
+import { buildSchoolScopeQuery, resolveSchoolId } from "@/lib/organization-school";
 import { hashPassword } from "@/lib/organization-auth";
 import { verifyAccessToken } from "@/lib/verify-access-token";
 
@@ -12,6 +13,7 @@ type StudentDocument = {
     classId: string;
     parentId: string;
     organizationId: string;
+    schoolId: string;
     address: string;
     photoUrl: string;
     createdAt: string;
@@ -26,6 +28,7 @@ type StudentResponse = StudentDocument & {
 type ClassDocument = {
     uid: string;
     organizationId: string;
+    schoolId: string;
 };
 
 type ParentDocument = {
@@ -36,6 +39,7 @@ type ParentDocument = {
     passwordHash?: string;
     role: "parent";
     organizationId: string;
+    schoolId: string;
     status: "active";
     createdAt: string;
     updatedAt: string;
@@ -141,6 +145,19 @@ export async function POST(request: Request) {
         }
 
         const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
         const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
         const studentsCollection = database.collection<StudentDocument>(
             STUDENTS_COLLECTION,
@@ -150,6 +167,7 @@ export async function POST(request: Request) {
         const classRecord = await classesCollection.findOne({
             uid: classId,
             organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
         });
 
         if (!classRecord) {
@@ -166,6 +184,7 @@ export async function POST(request: Request) {
             classId,
             enrollmentNumber,
             organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
         });
 
         if (existingEnrollment) {
@@ -186,6 +205,7 @@ export async function POST(request: Request) {
             organizationId: tokenPayload.uid,
             role: "parent",
             email: parentEmail,
+            ...buildSchoolScopeQuery(schoolId),
         });
 
         let parentId = existingParent?.uid ?? "";
@@ -199,6 +219,7 @@ export async function POST(request: Request) {
                 passwordHash: hashPassword(formatDobPassword(dob)),
                 role: "parent",
                 organizationId: tokenPayload.uid,
+                schoolId,
                 status: "active",
                 createdAt: now,
                 updatedAt: now,
@@ -221,11 +242,15 @@ export async function POST(request: Request) {
                 parentUpdates.passwordHash = hashPassword(formatDobPassword(dob));
             }
 
+            if (existingParent.schoolId !== schoolId) {
+                parentUpdates.schoolId = schoolId;
+            }
+
             if (Object.keys(parentUpdates).length > 0) {
                 parentUpdates.updatedAt = now;
 
                 await usersCollection.updateOne(
-                    { uid: existingParent.uid },
+                    { uid: existingParent.uid, organizationId: tokenPayload.uid },
                     {
                         $set: parentUpdates,
                     },
@@ -241,6 +266,7 @@ export async function POST(request: Request) {
             classId,
             parentId,
             organizationId: tokenPayload.uid,
+            schoolId,
             address,
             photoUrl: "",
             createdAt: now,
@@ -281,6 +307,19 @@ export async function GET(request: Request) {
         }
 
         const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
         const studentsCollection = database.collection<StudentDocument>(
             STUDENTS_COLLECTION,
         );
@@ -288,7 +327,10 @@ export async function GET(request: Request) {
 
         const students = await studentsCollection
             .find(
-                { organizationId: tokenPayload.uid },
+                {
+                    organizationId: tokenPayload.uid,
+                    ...buildSchoolScopeQuery(schoolId),
+                },
                 {
                     projection: {
                         _id: 1,
@@ -299,6 +341,7 @@ export async function GET(request: Request) {
                         classId: 1,
                         parentId: 1,
                         organizationId: 1,
+                        schoolId: 1,
                         address: 1,
                         photoUrl: 1,
                         createdAt: 1,
@@ -308,7 +351,9 @@ export async function GET(request: Request) {
             .sort({ createdAt: -1 })
             .toArray();
 
-        const parentIds = [...new Set(students.map((student) => student.parentId).filter(Boolean))];
+        const parentIds = [
+            ...new Set(students.map((student) => student.parentId).filter(Boolean)),
+        ];
         const parents = parentIds.length
             ? await usersCollection
                   .find(
@@ -316,6 +361,7 @@ export async function GET(request: Request) {
                           organizationId: tokenPayload.uid,
                           role: "parent",
                           uid: { $in: parentIds },
+                          ...buildSchoolScopeQuery(schoolId),
                       },
                       {
                           projection: {

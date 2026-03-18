@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 type AccessTokenPayload = {
     email: string;
     uid: string;
+    schoolId?: string;
     exp: number;
 };
 
@@ -58,6 +59,10 @@ function validateAccessToken(token: string): AccessTokenPayload | null {
         const payload = JSON.parse(
             Buffer.from(encodedPayload, "base64url").toString("utf8"),
         ) as AccessTokenPayload;
+
+        if (payload.schoolId && typeof payload.schoolId !== "string") {
+            return null;
+        }
 
         if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
             return null;

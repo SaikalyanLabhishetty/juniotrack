@@ -44,9 +44,15 @@ export default function DashboardLayout({
         "/profile": { title: "Organization Profile", subtitle: "Manage your organization settings and security." },
     };
 
-    const currentRouteInfo = Object.entries(routeTitles).find(([route]) =>
-        pathname === route || pathname.startsWith(`${route}/`)
-    )?.[1] || { title: "Organization Panel", subtitle: "" };
+    const isAddSchoolRoute = /^\/[^/]+\/addnew$/.test(pathname);
+    const currentRouteInfo = isAddSchoolRoute
+        ? {
+            title: "Add New School",
+            subtitle: "Create a school and attach it to this organization.",
+        }
+        : Object.entries(routeTitles).find(([route]) =>
+            pathname === route || pathname.startsWith(`${route}/`)
+        )?.[1] || { title: "Organization Panel", subtitle: "" };
 
     return (
         <div className="flex min-h-screen">
@@ -133,6 +139,7 @@ export default function DashboardLayout({
             <main className="flex-1">
                 <SiteHeader
                     showAction={false}
+                    showSchoolSwitcher
                     title={currentRouteInfo.title}
                     subtitle={currentRouteInfo.subtitle}
                 />

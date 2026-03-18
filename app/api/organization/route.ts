@@ -5,6 +5,7 @@ import { getDatabase } from "@/lib/mongodb";
 
 type CreateOrganizationPayload = {
   organizationName?: string;
+  schoolName?: string;
   name?: string;
   email?: string;
   phone?: string;
@@ -15,15 +16,23 @@ type CreateOrganizationPayload = {
   password?: string;
 };
 
-type OrganizationDocument = {
+type SchoolDocument = {
   uid: string;
-  name: string;
-  email: string;
+  schoolName: string;
+  name?: string;
   phone: string;
   state: string;
   district: string;
   pincode: string;
   address: string;
+};
+
+type OrganizationDocument = {
+  uid: string;
+  name: string;
+  organizationName: string;
+  email: string;
+  schools: SchoolDocument[];
   passwordHash: string;
   createdAt: string;
   status: "active";
@@ -41,7 +50,9 @@ function normalizeString(value: unknown) {
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as CreateOrganizationPayload;
-    const organizationName = normalizeString(payload.organizationName || payload.name);
+    const name = normalizeString(payload.name);
+    const organizationName = normalizeString(payload.organizationName);
+    const schoolName = normalizeString(payload.schoolName);
     const email = normalizeString(payload.email).toLowerCase();
     const phone = normalizeString(payload.phone);
     const state = normalizeString(payload.state);
@@ -52,8 +63,16 @@ export async function POST(request: Request) {
 
     const fieldErrors: Record<string, string> = {};
 
+    if (!name) {
+      fieldErrors.name = "Name is required.";
+    }
+
     if (!organizationName) {
       fieldErrors.organizationName = "Organization name is required.";
+    }
+
+    if (!schoolName) {
+      fieldErrors.schoolName = "School name is required.";
     }
 
     if (!emailPattern.test(email)) {
@@ -121,15 +140,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const organization: OrganizationDocument = {
+    const school: SchoolDocument = {
       uid: randomUUID(),
-      name: organizationName,
-      email,
+      schoolName,
+      name: schoolName,
       phone,
       state,
       district,
       pincode,
       address,
+    };
+
+    const organization: OrganizationDocument = {
+      uid: randomUUID(),
+      name,
+      organizationName,
+      email,
+      schools: [school],
       passwordHash: hashPassword(password),
       createdAt: new Date().toISOString().slice(0, 10),
       status: "active",

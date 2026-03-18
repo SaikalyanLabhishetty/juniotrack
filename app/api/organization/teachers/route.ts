@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
+import { buildSchoolScopeQuery, resolveSchoolId } from "@/lib/organization-school";
 import { hashPassword } from "@/lib/organization-auth";
 import { getDatabase } from "@/lib/mongodb";
 import { verifyAccessToken } from "@/lib/verify-access-token";
@@ -12,6 +13,7 @@ type TeacherDocument = {
     passwordHash: string;
     role: "teacher";
     organizationId: string;
+    schoolId: string;
     status: "active";
     createdAt: string;
     updatedAt: string;
@@ -20,6 +22,12 @@ type TeacherDocument = {
     classTeacherClassId: string;
     subjects: string[];
     isClassTeacher: boolean;
+};
+
+type ClassDocument = {
+    uid: string;
+    organizationId: string;
+    schoolId: string;
 };
 
 type CreateTeacherPayload = {
@@ -33,6 +41,7 @@ type CreateTeacherPayload = {
 };
 
 const COLLECTION_NAME = "users";
+const CLASSES_COLLECTION = "classes";
 const phonePattern = /^\d{10}$/;
 
 function normalizeString(value: unknown) {
@@ -77,6 +86,19 @@ export async function GET(request: NextRequest) {
         }
 
         const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
         const collection = database.collection<TeacherDocument>(COLLECTION_NAME);
 
         const teachers = await collection
@@ -84,6 +106,7 @@ export async function GET(request: NextRequest) {
                 {
                     organizationId: tokenPayload.uid,
                     role: "teacher",
+                    ...buildSchoolScopeQuery(schoolId),
                 },
                 {
                     projection: {
@@ -96,6 +119,7 @@ export async function GET(request: NextRequest) {
                         classTeacherClassId: 1,
                         subjects: 1,
                         isClassTeacher: 1,
+                        schoolId: 1,
                         createdAt: 1,
                         status: 1,
                     },
@@ -166,7 +190,60 @@ export async function POST(request: Request) {
         }
 
         const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
         const collection = database.collection<TeacherDocument>(COLLECTION_NAME);
+        const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
+
+        const uniqueClassIds = [...new Set(classIds)];
+        const validClasses = uniqueClassIds.length
+            ? await classesCollection
+                  .find(
+                      {
+                          uid: { $in: uniqueClassIds },
+                          organizationId: tokenPayload.uid,
+                          ...buildSchoolScopeQuery(schoolId),
+                      },
+                      {
+                          projection: {
+                              uid: 1,
+                          },
+                      },
+                  )
+                  .toArray()
+            : [];
+        const validClassIdSet = new Set(validClasses.map((classItem) => classItem.uid));
+
+        if (validClassIdSet.size !== uniqueClassIds.length) {
+            fieldErrors.classIds = "Select valid classes for the current school.";
+        }
+
+        if (
+            isClassTeacher &&
+            classTeacherClassId &&
+            !validClassIdSet.has(classTeacherClassId)
+        ) {
+            fieldErrors.classTeacherClassId =
+                "Class teacher assignment must belong to the selected school.";
+        }
+
+        if (Object.keys(fieldErrors).length > 0) {
+            return NextResponse.json(
+                { message: "Validation failed.", fieldErrors },
+                { status: 400 },
+            );
+        }
 
         const now = new Date().toISOString();
         const teacher: TeacherDocument = {
@@ -177,11 +254,12 @@ export async function POST(request: Request) {
             passwordHash: hashPassword(formatDobPassword(dob)),
             role: "teacher",
             organizationId: tokenPayload.uid,
+            schoolId,
             status: "active",
             createdAt: now,
             updatedAt: now,
             dob,
-            classIds,
+            classIds: uniqueClassIds,
             classTeacherClassId: isClassTeacher ? classTeacherClassId : "",
             subjects,
             isClassTeacher,

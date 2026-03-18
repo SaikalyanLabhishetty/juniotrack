@@ -1,17 +1,33 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAuthorizationHeader } from "@/lib/client-auth";
+import {
+    getAuthorizationHeader,
+    getStoredAccessTokenPayload,
+} from "@/lib/client-auth";
 
 type Organization = {
-    name: string;
+    uid?: string;
+    name?: string;
+    organizationName?: string;
     email: string;
-    phone: string;
-    address: string;
-    state: string;
-    district: string;
-    pincode: string;
     createdAt: string;
+    schools?: Array<{
+        uid: string;
+        schoolName?: string;
+        name?: string;
+        phone: string;
+        state: string;
+        district: string;
+        pincode: string;
+        address: string;
+    }>;
+    // Legacy fields kept for backward compatibility.
+    phone?: string;
+    address?: string;
+    state?: string;
+    district?: string;
+    pincode?: string;
 };
 
 export function ProfileDetails() {
@@ -62,12 +78,32 @@ export function ProfileDetails() {
 
     if (!organization) return null;
 
+    const selectedSchoolId = getStoredAccessTokenPayload()?.schoolId?.trim() || "";
+    const selectedSchool =
+        organization.schools?.find((schoolItem) => schoolItem.uid === selectedSchoolId) ||
+        organization.schools?.[0];
+    const school = selectedSchool ?? {
+        schoolName: organization.organizationName ?? organization.name ?? "",
+        name: organization.organizationName ?? organization.name ?? "",
+        phone: organization.phone ?? "",
+        address: organization.address ?? "",
+        district: organization.district ?? "",
+        state: organization.state ?? "",
+        pincode: organization.pincode ?? "",
+    };
+    const organizationName =
+        organization.organizationName || school.schoolName || school.name || "-";
+    const locationText = [school.district, school.state].filter(Boolean).join(", ");
+    const locationValue = school.pincode
+        ? `${locationText}${locationText ? " - " : ""}${school.pincode}`
+        : locationText || "-";
+
     const details = [
-        { label: "Organization Name", value: organization.name },
+        { label: "Organization Name", value: organizationName },
         { label: "Email Address", value: organization.email },
-        { label: "Phone Number", value: organization.phone },
-        { label: "Address", value: organization.address },
-        { label: "Location", value: `${organization.district}, ${organization.state} - ${organization.pincode}` },
+        { label: "Phone Number", value: school.phone || "-" },
+        { label: "Address", value: school.address || "-" },
+        { label: "Location", value: locationValue },
         { label: "Joined On", value: new Date(organization.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" }) },
     ];
 

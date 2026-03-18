@@ -13,6 +13,7 @@ type OrganizationFormData = {
   email: string;
   phone: string;
   organizationName: string;
+  schoolName: string;
   state: string;
   district: string;
   pincode: string;
@@ -40,6 +41,7 @@ const initialFormData: OrganizationFormData = {
   email: "",
   phone: "",
   organizationName: "",
+  schoolName: "",
   state: "",
   district: "",
   pincode: "",
@@ -74,6 +76,10 @@ function validateField(
   name: keyof OrganizationFormData,
   value: string,
 ): string | undefined {
+  if (name === "name" && !value.trim()) {
+    return "Name is required.";
+  }
+
   if (name === "email" && !emailPattern.test(value.trim())) {
     return "Enter a valid email address.";
   }
@@ -92,6 +98,10 @@ function validateField(
 
   if (name === "organizationName" && !value.trim()) {
     return "Organization name is required.";
+  }
+
+  if (name === "schoolName" && !value.trim()) {
+    return "School name is required.";
   }
 
   return undefined;
@@ -200,7 +210,9 @@ export function OrganizationForm() {
         fieldName !== "pincode" &&
         fieldName !== "state" &&
         fieldName !== "district" &&
+        fieldName !== "name" &&
         fieldName !== "organizationName" &&
+        fieldName !== "schoolName" &&
         fieldName !== "address"
       ) {
         return current;
@@ -244,10 +256,12 @@ export function OrganizationForm() {
 
     const selectedStateRecord = findStateRecord(formData.state);
     const nextFieldErrors: FormFieldErrors = {
+      name: validateField("name", formData.name),
       organizationName: validateField(
         "organizationName",
         formData.organizationName,
       ),
+      schoolName: validateField("schoolName", formData.schoolName),
       email: validateField("email", formData.email),
       phone: validateField("phone", formData.phone),
       pincode: validateField("pincode", formData.pincode),
@@ -293,7 +307,9 @@ export function OrganizationForm() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          name: formData.name,
           organizationName: formData.organizationName,
+          schoolName: formData.schoolName,
           email: formData.email,
           phone: formData.phone,
           state: formData.state,
@@ -354,6 +370,9 @@ export function OrganizationForm() {
             autoComplete="name"
             required
           />
+          {fieldErrors.name ? (
+            <p className={errorTextClassName}>{fieldErrors.name}</p>
+          ) : null}
         </label>
 
         <label className="text-sm font-medium text-[#243552]">
@@ -408,6 +427,24 @@ export function OrganizationForm() {
           {fieldErrors.organizationName ? (
             <p className={errorTextClassName}>
               {fieldErrors.organizationName}
+            </p>
+          ) : null}
+        </label>
+
+        <label className="text-sm font-medium text-[#243552]">
+          School Name
+          <input
+            className={inputClassName}
+            name="schoolName"
+            type="text"
+            value={formData.schoolName ?? ""}
+            onChange={handleChange}
+            placeholder="Enter school name"
+            required
+          />
+          {fieldErrors.schoolName ? (
+            <p className={errorTextClassName}>
+              {fieldErrors.schoolName}
             </p>
           ) : null}
         </label>

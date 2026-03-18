@@ -63,14 +63,30 @@ export function verifyPassword(password: string, storedHash: string) {
   return timingSafeEqual(savedHashBuffer, derivedHash);
 }
 
-export function createAccessToken(payload: { email: string; uid: string }) {
+export function createAccessToken(payload: {
+  email: string;
+  uid: string;
+  schoolId?: string;
+}) {
   const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS;
+  const normalizedSchoolId = payload.schoolId?.trim() || "";
+  const tokenPayload: {
+    email: string;
+    exp: number;
+    uid: string;
+    schoolId?: string;
+  } = {
+    email: payload.email,
+    exp: expiresAt,
+    uid: payload.uid,
+  };
+
+  if (normalizedSchoolId) {
+    tokenPayload.schoolId = normalizedSchoolId;
+  }
+
   const encodedPayload = Buffer.from(
-    JSON.stringify({
-      email: payload.email,
-      exp: expiresAt,
-      uid: payload.uid,
-    }),
+    JSON.stringify(tokenPayload),
   ).toString("base64url");
 
   const signature = createHmac("sha256", getJwtSecret())

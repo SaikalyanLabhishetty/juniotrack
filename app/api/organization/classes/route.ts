@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 import { getDatabase } from "@/lib/mongodb";
+import { buildSchoolScopeQuery, resolveSchoolId } from "@/lib/organization-school";
 import { verifyAccessToken } from "@/lib/verify-access-token";
 
 type ClassDocument = {
@@ -9,6 +10,7 @@ type ClassDocument = {
     section: string;
     teacherId: string;
     organizationId: string;
+    schoolId: string;
     academicYear: string;
     createdAt: string;
 };
@@ -57,10 +59,24 @@ export async function GET(request: NextRequest) {
         );
 
         const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
         const collection = database.collection<ClassDocument>(CLASSES_COLLECTION);
 
-        const filter: Record<string, string> = {
+        const filter: Record<string, unknown> = {
             organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
         };
 
         if (academicYearFilter) {
@@ -76,6 +92,7 @@ export async function GET(request: NextRequest) {
                     section: 1,
                     teacherId: 1,
                     organizationId: 1,
+                    schoolId: 1,
                     academicYear: 1,
                     createdAt: 1,
                 },
@@ -132,6 +149,19 @@ export async function POST(request: Request) {
         }
 
         const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
         const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
 
         const existingClass = await classesCollection.findOne({
@@ -139,6 +169,7 @@ export async function POST(request: Request) {
             section,
             academicYear,
             organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
         });
 
         if (existingClass) {
@@ -159,6 +190,7 @@ export async function POST(request: Request) {
             section,
             teacherId,
             organizationId: tokenPayload.uid,
+            schoolId,
             academicYear,
             createdAt: new Date().toISOString().slice(0, 10),
         };
