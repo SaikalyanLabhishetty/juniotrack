@@ -22,6 +22,18 @@ type CreateClassPayload = {
     academicYear?: string;
 };
 
+type UpdateClassPayload = {
+    uid?: string;
+    className?: string;
+    section?: string;
+    teacherId?: string;
+    academicYear?: string;
+};
+
+type DeleteClassPayload = {
+    uid?: string;
+};
+
 const CLASSES_COLLECTION = "classes";
 const sectionPattern = /^[A-Z]+$/;
 
@@ -210,6 +222,190 @@ export async function POST(request: Request) {
     } catch (error) {
         const message =
             error instanceof Error ? error.message : "Unable to create class.";
+
+        return NextResponse.json({ message }, { status: 500 });
+    }
+}
+
+export async function PUT(request: Request) {
+    try {
+        const tokenPayload = await verifyAccessToken(request);
+
+        if (!tokenPayload) {
+            return NextResponse.json(
+                { message: "Unauthorized. Please login again." },
+                { status: 401 },
+            );
+        }
+
+        const payload = (await request.json()) as UpdateClassPayload;
+        const uid = normalizeString(payload.uid);
+        const className = normalizeString(payload.className).toUpperCase();
+        const section = normalizeString(payload.section).toUpperCase();
+        const teacherId = normalizeString(payload.teacherId);
+        const academicYear = normalizeAcademicYear(payload.academicYear);
+
+        const fieldErrors: Record<string, string> = {};
+
+        if (!uid) {
+            fieldErrors.uid = "uid is required.";
+        }
+
+        if (!className) {
+            fieldErrors.className = "Class name is required.";
+        }
+
+        if (!sectionPattern.test(section)) {
+            fieldErrors.section = "Section must contain only alphabets (A-Z).";
+        }
+
+        if (!isValidAcademicYear(academicYear)) {
+            fieldErrors.academicYear =
+                "Academic year must be in YYYY-YYYY format (e.g. 2025-2026).";
+        }
+
+        if (Object.keys(fieldErrors).length > 0) {
+            return NextResponse.json(
+                { message: "Validation failed.", fieldErrors },
+                { status: 400 },
+            );
+        }
+
+        const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
+
+        const existingClass = await classesCollection.findOne({
+            uid,
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (!existingClass) {
+            return NextResponse.json(
+                { message: "Class not found." },
+                { status: 404 },
+            );
+        }
+
+        const duplicateClass = await classesCollection.findOne({
+            uid: { $ne: uid },
+            className,
+            section,
+            academicYear,
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (duplicateClass) {
+            return NextResponse.json(
+                {
+                    message: "Class already exists for this academic year.",
+                    fieldErrors: {
+                        className:
+                            "This class and section already exists for the selected academic year.",
+                    },
+                },
+                { status: 409 },
+            );
+        }
+
+        await classesCollection.updateOne(
+            {
+                uid,
+                organizationId: tokenPayload.uid,
+                ...buildSchoolScopeQuery(schoolId),
+            },
+            {
+                $set: {
+                    className,
+                    section,
+                    teacherId,
+                    academicYear,
+                },
+            },
+        );
+
+        return NextResponse.json({
+            message: "Class updated successfully.",
+        });
+    } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Unable to update class.";
+
+        return NextResponse.json({ message }, { status: 500 });
+    }
+}
+
+export async function DELETE(request: Request) {
+    try {
+        const tokenPayload = await verifyAccessToken(request);
+
+        if (!tokenPayload) {
+            return NextResponse.json(
+                { message: "Unauthorized. Please login again." },
+                { status: 401 },
+            );
+        }
+
+        const payload = (await request.json()) as DeleteClassPayload;
+        const uid = normalizeString(payload.uid);
+
+        if (!uid) {
+            return NextResponse.json(
+                {
+                    message: "Validation failed.",
+                    fieldErrors: { uid: "uid is required." },
+                },
+                { status: 400 },
+            );
+        }
+
+        const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
+
+        const result = await classesCollection.deleteOne({
+            uid,
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (result.deletedCount === 0) {
+            return NextResponse.json(
+                { message: "Class not found." },
+                { status: 404 },
+            );
+        }
+
+        return NextResponse.json({ message: "Class deleted successfully." });
+    } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Unable to delete class.";
 
         return NextResponse.json({ message }, { status: 500 });
     }

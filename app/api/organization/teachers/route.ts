@@ -48,6 +48,21 @@ type CreateTeacherPayload = {
     isClassTeacher?: boolean;
 };
 
+type UpdateTeacherPayload = {
+    uid?: string;
+    name?: string;
+    phone?: string;
+    dob?: string;
+    classIds?: string[];
+    classTeacherClassId?: string;
+    subjects?: string[];
+    isClassTeacher?: boolean;
+};
+
+type DeleteTeacherPayload = {
+    uid?: string;
+};
+
 const COLLECTION_NAME = "users";
 const CLASSES_COLLECTION = "classes";
 const phonePattern = /^\d{10}$/;
@@ -342,6 +357,260 @@ export async function POST(request: Request) {
     } catch (error) {
         const message =
             error instanceof Error ? error.message : "Unable to add teacher.";
+
+        return NextResponse.json({ message }, { status: 500 });
+    }
+}
+
+export async function PUT(request: Request) {
+    try {
+        const tokenPayload = await verifyAccessToken(request);
+
+        if (!tokenPayload) {
+            return NextResponse.json(
+                { message: "Unauthorized. Please login again." },
+                { status: 401 },
+            );
+        }
+
+        const payload = (await request.json()) as UpdateTeacherPayload;
+        const uid = normalizeString(payload.uid);
+        const name = normalizeString(payload.name);
+        const phone = normalizeString(payload.phone);
+        const dob = normalizeString(payload.dob);
+        const classIds = normalizeArray(payload.classIds);
+        const classTeacherClassId = normalizeString(payload.classTeacherClassId);
+        const subjects = normalizeArray(payload.subjects);
+        const isClassTeacher = Boolean(payload.isClassTeacher);
+
+        const fieldErrors: Record<string, string> = {};
+
+        if (!uid) {
+            fieldErrors.uid = "uid is required.";
+        }
+
+        if (!name) {
+            fieldErrors.name = "Teacher name is required.";
+        }
+
+        if (!phonePattern.test(phone)) {
+            fieldErrors.phone = "Phone number must be exactly 10 digits.";
+        }
+
+        if (!dob) {
+            fieldErrors.dob = "Date of birth is required.";
+        }
+
+        if (classIds.length === 0) {
+            fieldErrors.classIds = "Select at least one class.";
+        }
+
+        if (isClassTeacher && !classTeacherClassId) {
+            fieldErrors.classTeacherClassId = "Select the class teacher assignment.";
+        } else if (isClassTeacher && !classIds.includes(classTeacherClassId)) {
+            fieldErrors.classTeacherClassId =
+                "Class teacher assignment must be one of the selected classes.";
+        }
+
+        if (Object.keys(fieldErrors).length > 0) {
+            return NextResponse.json(
+                { message: "Validation failed.", fieldErrors },
+                { status: 400 },
+            );
+        }
+
+        const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        const teachersCollection = database.collection<TeacherDocument>(COLLECTION_NAME);
+        const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
+        const organizationsCollection = database.collection<OrganizationDocument>(
+            "organization",
+        );
+
+        const teacher = await teachersCollection.findOne({
+            uid,
+            role: "teacher",
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (!teacher) {
+            return NextResponse.json(
+                { message: "Teacher not found." },
+                { status: 404 },
+            );
+        }
+
+        const organization = await organizationsCollection.findOne(
+            { uid: tokenPayload.uid },
+            {
+                projection: {
+                    schools: 1,
+                },
+            },
+        );
+
+        const schools = Array.isArray(organization?.schools)
+            ? organization?.schools
+            : [];
+        const activeSchool = schools.find(
+            (school) => normalizeString(school.uid) === schoolId,
+        );
+        const schoolSubjects = Array.isArray(activeSchool?.subjects)
+            ? activeSchool.subjects
+                  .map((subject) => normalizeString(subject))
+                  .filter(Boolean)
+            : [];
+        const validSubjectSet = new Set(schoolSubjects);
+
+        if (validSubjectSet.size > 0 && subjects.length === 0) {
+            fieldErrors.subjects = "Select at least one subject.";
+        } else if (
+            validSubjectSet.size > 0 &&
+            subjects.some((subject) => !validSubjectSet.has(subject))
+        ) {
+            fieldErrors.subjects = "Select valid subjects for the current school.";
+        }
+
+        const uniqueClassIds = [...new Set(classIds)];
+        const validClasses = uniqueClassIds.length
+            ? await classesCollection
+                  .find(
+                      {
+                          uid: { $in: uniqueClassIds },
+                          organizationId: tokenPayload.uid,
+                          ...buildSchoolScopeQuery(schoolId),
+                      },
+                      {
+                          projection: {
+                              uid: 1,
+                          },
+                      },
+                  )
+                  .toArray()
+            : [];
+        const validClassIdSet = new Set(validClasses.map((classItem) => classItem.uid));
+
+        if (validClassIdSet.size !== uniqueClassIds.length) {
+            fieldErrors.classIds = "Select valid classes for the current school.";
+        }
+
+        if (
+            isClassTeacher &&
+            classTeacherClassId &&
+            !validClassIdSet.has(classTeacherClassId)
+        ) {
+            fieldErrors.classTeacherClassId =
+                "Class teacher assignment must belong to the selected school.";
+        }
+
+        if (Object.keys(fieldErrors).length > 0) {
+            return NextResponse.json(
+                { message: "Validation failed.", fieldErrors },
+                { status: 400 },
+            );
+        }
+
+        await teachersCollection.updateOne(
+            {
+                uid,
+                role: "teacher",
+                organizationId: tokenPayload.uid,
+                ...buildSchoolScopeQuery(schoolId),
+            },
+            {
+                $set: {
+                    name,
+                    phone,
+                    dob,
+                    classIds: uniqueClassIds,
+                    classTeacherClassId: isClassTeacher ? classTeacherClassId : "",
+                    subjects,
+                    isClassTeacher,
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        );
+
+        return NextResponse.json({ message: "Teacher updated successfully." });
+    } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Unable to update teacher.";
+
+        return NextResponse.json({ message }, { status: 500 });
+    }
+}
+
+export async function DELETE(request: Request) {
+    try {
+        const tokenPayload = await verifyAccessToken(request);
+
+        if (!tokenPayload) {
+            return NextResponse.json(
+                { message: "Unauthorized. Please login again." },
+                { status: 401 },
+            );
+        }
+
+        const payload = (await request.json()) as DeleteTeacherPayload;
+        const uid = normalizeString(payload.uid);
+
+        if (!uid) {
+            return NextResponse.json(
+                {
+                    message: "Validation failed.",
+                    fieldErrors: { uid: "uid is required." },
+                },
+                { status: 400 },
+            );
+        }
+
+        const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        const teachersCollection = database.collection<TeacherDocument>(COLLECTION_NAME);
+
+        const result = await teachersCollection.deleteOne({
+            uid,
+            role: "teacher",
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (result.deletedCount === 0) {
+            return NextResponse.json(
+                { message: "Teacher not found." },
+                { status: 404 },
+            );
+        }
+
+        return NextResponse.json({ message: "Teacher deleted successfully." });
+    } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Unable to delete teacher.";
 
         return NextResponse.json({ message }, { status: 500 });
     }

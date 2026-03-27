@@ -56,6 +56,22 @@ type CreateStudentPayload = {
     address?: string;
 };
 
+type UpdateStudentPayload = {
+    uid?: string;
+    name?: string;
+    dob?: string;
+    enrollmentNumber?: string;
+    classId?: string;
+    parentName?: string;
+    parentPhone?: string;
+    parentEmail?: string;
+    address?: string;
+};
+
+type DeleteStudentPayload = {
+    uid?: string;
+};
+
 const STUDENTS_COLLECTION = "students";
 const CLASSES_COLLECTION = "classes";
 const USERS_COLLECTION = "users";
@@ -402,6 +418,280 @@ export async function GET(request: Request) {
     } catch (error) {
         const message =
             error instanceof Error ? error.message : "Unable to fetch students.";
+
+        return NextResponse.json({ message }, { status: 500 });
+    }
+}
+
+export async function PUT(request: Request) {
+    try {
+        const tokenPayload = await verifyAccessToken(request);
+
+        if (!tokenPayload) {
+            return NextResponse.json(
+                { message: "Unauthorized. Please login again." },
+                { status: 401 },
+            );
+        }
+
+        const payload = (await request.json()) as UpdateStudentPayload;
+
+        const uid = normalizeString(payload.uid);
+        const name = normalizeString(payload.name);
+        const dob = normalizeString(payload.dob);
+        const enrollmentNumber = normalizeString(payload.enrollmentNumber);
+        const classId = normalizeString(payload.classId);
+        const parentName = normalizeString(payload.parentName);
+        const parentPhone = normalizeString(payload.parentPhone);
+        const parentEmail = normalizeString(payload.parentEmail).toLowerCase();
+        const address = normalizeString(payload.address);
+
+        const fieldErrors: Record<string, string> = {};
+
+        if (!uid) {
+            fieldErrors.uid = "uid is required.";
+        }
+
+        if (!name) {
+            fieldErrors.name = "Student name is required.";
+        }
+
+        if (!dob) {
+            fieldErrors.dob = "Date of birth is required.";
+        }
+
+        if (!enrollmentNumber) {
+            fieldErrors.enrollmentNumber = "Enrollment number is required.";
+        }
+
+        if (!classId) {
+            fieldErrors.classId = "Class is required.";
+        }
+
+        if (!parentName) {
+            fieldErrors.parentName = "Parent name is required.";
+        }
+
+        if (!phonePattern.test(parentPhone)) {
+            fieldErrors.parentPhone = "Phone number must be exactly 10 digits.";
+        }
+
+        if (!emailPattern.test(parentEmail)) {
+            fieldErrors.parentEmail = "Enter a valid email address.";
+        }
+
+        if (!address) {
+            fieldErrors.address = "Address is required.";
+        }
+
+        if (Object.keys(fieldErrors).length > 0) {
+            return NextResponse.json(
+                { message: "Validation failed.", fieldErrors },
+                { status: 400 },
+            );
+        }
+
+        const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
+        const studentsCollection = database.collection<StudentDocument>(
+            STUDENTS_COLLECTION,
+        );
+        const usersCollection = database.collection<ParentDocument>(USERS_COLLECTION);
+
+        const existingStudent = await studentsCollection.findOne({
+            uid,
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (!existingStudent) {
+            return NextResponse.json(
+                { message: "Student not found." },
+                { status: 404 },
+            );
+        }
+
+        const classRecord = await classesCollection.findOne({
+            uid: classId,
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (!classRecord) {
+            return NextResponse.json(
+                {
+                    message: "Class not found.",
+                    fieldErrors: { classId: "Select a valid class." },
+                },
+                { status: 400 },
+            );
+        }
+
+        const existingEnrollment = await studentsCollection.findOne({
+            uid: { $ne: uid },
+            classId,
+            enrollmentNumber,
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (existingEnrollment) {
+            return NextResponse.json(
+                {
+                    message: "Enrollment number already exists in this class.",
+                    fieldErrors: {
+                        enrollmentNumber:
+                            "This enrollment number is already assigned in the selected class.",
+                    },
+                },
+                { status: 409 },
+            );
+        }
+
+        const now = new Date().toISOString();
+        const parentLookup = await usersCollection.findOne({
+            organizationId: tokenPayload.uid,
+            role: "parent",
+            email: parentEmail,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        let parentId = parentLookup?.uid ?? "";
+
+        if (!parentId) {
+            const newParent: ParentDocument = {
+                uid: randomUUID(),
+                name: parentName,
+                phone: parentPhone,
+                email: parentEmail,
+                passwordHash: hashPassword(formatDobPassword(dob)),
+                role: "parent",
+                organizationId: tokenPayload.uid,
+                schoolId,
+                status: "active",
+                createdAt: now,
+                updatedAt: now,
+            };
+
+            await usersCollection.insertOne(newParent);
+            parentId = newParent.uid;
+        } else {
+            await usersCollection.updateOne(
+                { uid: parentId, organizationId: tokenPayload.uid },
+                {
+                    $set: {
+                        name: parentName,
+                        phone: parentPhone,
+                        schoolId,
+                        updatedAt: now,
+                    },
+                    $setOnInsert: {
+                        email: parentEmail,
+                    },
+                },
+            );
+        }
+
+        await studentsCollection.updateOne(
+            {
+                uid,
+                organizationId: tokenPayload.uid,
+                ...buildSchoolScopeQuery(schoolId),
+            },
+            {
+                $set: {
+                    name,
+                    dob,
+                    enrollmentNumber,
+                    classId,
+                    parentId,
+                    schoolId,
+                    address,
+                },
+            },
+        );
+
+        return NextResponse.json({ message: "Student updated successfully." });
+    } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Unable to update student.";
+
+        return NextResponse.json({ message }, { status: 500 });
+    }
+}
+
+export async function DELETE(request: Request) {
+    try {
+        const tokenPayload = await verifyAccessToken(request);
+
+        if (!tokenPayload) {
+            return NextResponse.json(
+                { message: "Unauthorized. Please login again." },
+                { status: 401 },
+            );
+        }
+
+        const payload = (await request.json()) as DeleteStudentPayload;
+        const uid = normalizeString(payload.uid);
+
+        if (!uid) {
+            return NextResponse.json(
+                {
+                    message: "Validation failed.",
+                    fieldErrors: { uid: "uid is required." },
+                },
+                { status: 400 },
+            );
+        }
+
+        const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        const studentsCollection = database.collection<StudentDocument>(
+            STUDENTS_COLLECTION,
+        );
+
+        const result = await studentsCollection.deleteOne({
+            uid,
+            organizationId: tokenPayload.uid,
+            ...buildSchoolScopeQuery(schoolId),
+        });
+
+        if (result.deletedCount === 0) {
+            return NextResponse.json(
+                { message: "Student not found." },
+                { status: 404 },
+            );
+        }
+
+        return NextResponse.json({ message: "Student deleted successfully." });
+    } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Unable to delete student.";
 
         return NextResponse.json({ message }, { status: 500 });
     }

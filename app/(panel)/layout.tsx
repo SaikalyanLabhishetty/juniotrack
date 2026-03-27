@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, GraduationCap, Users, UserRound, LogOut, Settings } from "lucide-react";
+import {
+    ClipboardList,
+    GraduationCap,
+    LayoutDashboard,
+    LogOut,
+    Settings,
+    UserRound,
+    Users,
+} from "lucide-react";
 import { ACCESS_TOKEN_STORAGE_KEY, getAuthorizationHeader } from "@/lib/client-auth";
 import { SiteHeader } from "../components/site-header";
 
@@ -27,6 +35,11 @@ const navItems = [
         href: "/students",
         icon: <UserRound size={18} strokeWidth={2} />,
     },
+    {
+        label: "Manage",
+        href: "/manage",
+        icon: <ClipboardList size={18} strokeWidth={2} />,
+    },
 ];
 
 export default function DashboardLayout({
@@ -41,6 +54,7 @@ export default function DashboardLayout({
         "/classes": { title: "Classes", subtitle: "Add and manage class sections for your organization." },
         "/teachers": { title: "Teachers", subtitle: "Add and manage teacher records." },
         "/students": { title: "Students", subtitle: "Add and manage student records." },
+        "/manage": { title: "Manage", subtitle: "Review classes, teachers, and students from one place." },
         "/profile": { title: "Organization Profile", subtitle: "Manage your organization settings and security." },
     };
 
