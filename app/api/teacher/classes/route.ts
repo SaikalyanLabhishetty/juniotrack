@@ -10,6 +10,8 @@ type TeacherDocument = {
     organizationId: string;
     schoolId: string;
     classIds: string[];
+    classTeacherClassId?: string;
+    isClassTeacher?: boolean;
 };
 
 type ClassDocument = {
@@ -90,6 +92,8 @@ export async function GET(request: Request) {
                     uid: 1,
                     name: 1,
                     classIds: 1,
+                    classTeacherClassId: 1,
+                    isClassTeacher: 1,
                 },
             },
         );
@@ -102,6 +106,11 @@ export async function GET(request: Request) {
         }
 
         const uniqueClassIds = [...new Set(normalizeStringArray(teacher.classIds))];
+        const classTeacherClassId = normalizeString(teacher.classTeacherClassId);
+        const classTeacherAssignment =
+            teacher.isClassTeacher && classTeacherClassId
+                ? { classTeacherClassId }
+                : {};
 
         if (uniqueClassIds.length === 0) {
             return NextResponse.json({
@@ -109,8 +118,8 @@ export async function GET(request: Request) {
                     uid: teacher.uid,
                     name: teacher.name,
                 },
-                classIds: [],
                 classes: [],
+                ...classTeacherAssignment,
             });
         }
 
@@ -147,8 +156,8 @@ export async function GET(request: Request) {
                 uid: teacher.uid,
                 name: teacher.name,
             },
-            classIds: orderedClasses.map((classItem) => classItem.uid),
             classes: orderedClasses,
+            ...classTeacherAssignment,
         });
     } catch (error) {
         const message =
