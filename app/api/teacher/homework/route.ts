@@ -38,6 +38,8 @@ type HomeworkStudentItem = {
     remarks: string;
 };
 
+type HomeworkRecordStatus = "pending" | "completed";
+
 type HomeworkDocument = {
     uid: string;
     organizationId: string;
@@ -51,6 +53,7 @@ type HomeworkDocument = {
     assignedDate: string;
     assignedStudents: HomeworkStudentItem[];
     dueDate: string;
+    recordStatus: HomeworkRecordStatus;
     createAt: string;
 };
 
@@ -95,6 +98,8 @@ const CLASSES_COLLECTION = "classes";
 const STUDENTS_COLLECTION = "students";
 const HOMEWORK_COLLECTION = "homework";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const RECORD_STATUS_PENDING: HomeworkRecordStatus = "pending";
+const RECORD_STATUS_COMPLETED: HomeworkRecordStatus = "completed";
 
 function normalizeString(value: unknown) {
     return typeof value === "string" ? value.trim() : "";
@@ -143,6 +148,12 @@ function normalizeHomeworkStudentItem(value: unknown): HomeworkStudentItem | nul
         status,
         remarks,
     };
+}
+
+function normalizeHomeworkRecordStatus(value: unknown): HomeworkRecordStatus {
+    return normalizeString(value).toLowerCase() === RECORD_STATUS_COMPLETED
+        ? RECORD_STATUS_COMPLETED
+        : RECORD_STATUS_PENDING;
 }
 
 function canTeacherAccessClass(
@@ -369,6 +380,7 @@ export async function GET(request: NextRequest) {
                     assignedDate: 1,
                     assignedStudents: 1,
                     dueDate: 1,
+                    recordStatus: 1,
                     createAt: 1,
                 },
                 sort: {
@@ -407,11 +419,16 @@ export async function GET(request: NextRequest) {
         );
 
         if (homework) {
+            const homeworkWithRecordStatus = {
+                ...homework,
+                recordStatus: normalizeHomeworkRecordStatus(homework.recordStatus),
+            };
+
             return NextResponse.json({
                 source: "homework",
                 class: classSummary,
                 date,
-                homework,
+                homework: homeworkWithRecordStatus,
                 assignedStudents: homeworkStudents,
             });
         }
@@ -704,6 +721,7 @@ export async function POST(request: Request) {
             assignedDate,
             assignedStudents: normalizedAssignedStudents,
             dueDate,
+            recordStatus: RECORD_STATUS_PENDING,
             createAt: new Date().toISOString(),
         };
 
@@ -774,15 +792,6 @@ export async function PUT(request: Request) {
             "assignedStudents",
         );
 
-        const hasUpdatableField =
-            hasTitle ||
-            hasDescription ||
-            hasSubject ||
-            hasAcademicYear ||
-            hasAssignedDate ||
-            hasDueDate ||
-            hasAssignedStudents;
-
         const title = normalizeString(payload.title);
         const description = normalizeString(payload.description);
         const subject = normalizeString(payload.subject);
@@ -810,11 +819,6 @@ export async function PUT(request: Request) {
                 },
                 { status: 403 },
             );
-        }
-
-        if (!hasUpdatableField) {
-            fieldErrors.update =
-                "Provide at least one updatable field (title, description, subject, academicYear, assignedDate, dueDate, assignedStudents).";
         }
 
         if (hasTitle && !title) {
@@ -1098,6 +1102,7 @@ export async function PUT(request: Request) {
 
         const updatePayload: Record<string, unknown> = {
             updatedAt: new Date().toISOString(),
+            recordStatus: RECORD_STATUS_COMPLETED,
         };
 
         if (hasTitle) {

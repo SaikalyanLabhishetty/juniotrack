@@ -9,6 +9,8 @@ type TeacherDocument = {
     organizationId: string;
 };
 
+type HomeworkRecordStatus = "pending" | "completed";
+
 type HomeworkDocument = {
     uid: string;
     teacherId: string;
@@ -17,6 +19,7 @@ type HomeworkDocument = {
     subject: string;
     assignedDate: string;
     dueDate: string;
+    recordStatus: HomeworkRecordStatus;
     createAt: string;
     organizationId: string;
     schoolId: string;
@@ -25,6 +28,8 @@ type HomeworkDocument = {
 const USERS_COLLECTION = "users";
 const HOMEWORK_COLLECTION = "homework";
 const PAGE_SIZE = 25;
+const RECORD_STATUS_PENDING: HomeworkRecordStatus = "pending";
+const RECORD_STATUS_COMPLETED: HomeworkRecordStatus = "completed";
 
 function normalizeString(value: unknown) {
     return typeof value === "string" ? value.trim() : "";
@@ -45,6 +50,12 @@ function parsePage(value: string) {
 
 function escapeRegExp(input: string) {
     return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeHomeworkRecordStatus(value: unknown): HomeworkRecordStatus {
+    return normalizeString(value).toLowerCase() === RECORD_STATUS_COMPLETED
+        ? RECORD_STATUS_COMPLETED
+        : RECORD_STATUS_PENDING;
 }
 
 export async function GET(request: NextRequest) {
@@ -163,6 +174,7 @@ export async function GET(request: NextRequest) {
                         subject: 1,
                         assignedDate: 1,
                         dueDate: 1,
+                        recordStatus: 1,
                     },
                 })
                 .sort({ assignedDate: -1, createAt: -1 })
@@ -170,6 +182,11 @@ export async function GET(request: NextRequest) {
                 .limit(PAGE_SIZE)
                 .toArray(),
         ]);
+
+        const homeworksWithRecordStatus = homeworks.map((homework) => ({
+            ...homework,
+            recordStatus: normalizeHomeworkRecordStatus(homework.recordStatus),
+        }));
 
         const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
 
@@ -179,7 +196,7 @@ export async function GET(request: NextRequest) {
             totalRecords,
             totalPages,
             subject: subject || null,
-            homeworks,
+            homeworks: homeworksWithRecordStatus,
         });
     } catch (error) {
         const message =
