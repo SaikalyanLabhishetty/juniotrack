@@ -77,6 +77,19 @@ type CreateHomeworkPayload = {
     dueDate?: string;
 };
 
+type UpdateHomeworkPayload = {
+    uid?: string;
+    homeworkId?: string;
+    teacherId?: string;
+    title?: string;
+    description?: string;
+    subject?: string;
+    academicYear?: string;
+    assignedDate?: string;
+    assignedStudents?: unknown;
+    dueDate?: string;
+};
+
 const USERS_COLLECTION = "users";
 const CLASSES_COLLECTION = "classes";
 const STUDENTS_COLLECTION = "students";
@@ -146,6 +159,10 @@ function canTeacherAccessClass(
 
 function isDateOrderValid(assignedDate: string, dueDate: string) {
     return dueDate >= assignedDate;
+}
+
+function getTodayDateString() {
+    return new Date().toISOString().slice(0, 10);
 }
 
 function buildClassSummary(classRecord: Pick<ClassDocument, "uid" | "className" | "section">) {
@@ -707,6 +724,443 @@ export async function POST(request: Request) {
             error instanceof Error
                 ? error.message
                 : "Unable to create homework.";
+
+        return NextResponse.json({ message }, { status: 500 });
+    }
+}
+
+export async function PUT(request: Request) {
+    try {
+        const tokenPayload = await verifyAccessToken(request);
+
+        if (!tokenPayload) {
+            return NextResponse.json(
+                { message: "Unauthorized. Please login again." },
+                { status: 401 },
+            );
+        }
+
+        const teacherUid = normalizeString(tokenPayload.userUid);
+
+        if (tokenPayload.role !== "teacher" || !teacherUid) {
+            return NextResponse.json(
+                { message: "Teacher access required. Please login again." },
+                { status: 403 },
+            );
+        }
+
+        const payload = (await request.json()) as UpdateHomeworkPayload;
+        const homeworkUid =
+            normalizeString(payload.uid) || normalizeString(payload.homeworkId);
+        const teacherId = normalizeString(payload.teacherId);
+
+        const hasTitle = Object.prototype.hasOwnProperty.call(payload, "title");
+        const hasDescription = Object.prototype.hasOwnProperty.call(
+            payload,
+            "description",
+        );
+        const hasSubject = Object.prototype.hasOwnProperty.call(payload, "subject");
+        const hasAcademicYear = Object.prototype.hasOwnProperty.call(
+            payload,
+            "academicYear",
+        );
+        const hasAssignedDate = Object.prototype.hasOwnProperty.call(
+            payload,
+            "assignedDate",
+        );
+        const hasDueDate = Object.prototype.hasOwnProperty.call(payload, "dueDate");
+        const hasAssignedStudents = Object.prototype.hasOwnProperty.call(
+            payload,
+            "assignedStudents",
+        );
+
+        const hasUpdatableField =
+            hasTitle ||
+            hasDescription ||
+            hasSubject ||
+            hasAcademicYear ||
+            hasAssignedDate ||
+            hasDueDate ||
+            hasAssignedStudents;
+
+        const title = normalizeString(payload.title);
+        const description = normalizeString(payload.description);
+        const subject = normalizeString(payload.subject);
+        const academicYear = normalizeString(payload.academicYear);
+        const assignedDate = normalizeString(payload.assignedDate);
+        const dueDate = normalizeString(payload.dueDate);
+        const assignedStudentsInput =
+            hasAssignedStudents && Array.isArray(payload.assignedStudents)
+                ? payload.assignedStudents
+                : [];
+
+        const fieldErrors: Record<string, string> = {};
+
+        if (!homeworkUid) {
+            fieldErrors.uid = "uid is required.";
+        }
+
+        if (teacherId && teacherId !== teacherUid) {
+            return NextResponse.json(
+                {
+                    message: "You can only update homework with your own teacherId.",
+                    fieldErrors: {
+                        teacherId: "teacherId must match the logged-in teacher.",
+                    },
+                },
+                { status: 403 },
+            );
+        }
+
+        if (!hasUpdatableField) {
+            fieldErrors.update =
+                "Provide at least one updatable field (title, description, subject, academicYear, assignedDate, dueDate, assignedStudents).";
+        }
+
+        if (hasTitle && !title) {
+            fieldErrors.title = "title cannot be empty.";
+        }
+
+        if (hasDescription && !description) {
+            fieldErrors.description = "description cannot be empty.";
+        }
+
+        if (hasSubject && !subject) {
+            fieldErrors.subject = "subject cannot be empty.";
+        }
+
+        if (hasAcademicYear) {
+            if (!academicYear) {
+                fieldErrors.academicYear = "academicYear cannot be empty.";
+            } else if (!isValidAcademicYear(academicYear)) {
+                fieldErrors.academicYear =
+                    "academicYear must be in YYYY-YYYY format (e.g. 2025-2026).";
+            }
+        }
+
+        if (hasAssignedDate) {
+            if (!assignedDate) {
+                fieldErrors.assignedDate = "assignedDate cannot be empty.";
+            } else if (!DATE_PATTERN.test(assignedDate)) {
+                fieldErrors.assignedDate = "assignedDate must be in YYYY-MM-DD format.";
+            }
+        }
+
+        if (hasDueDate) {
+            if (!dueDate) {
+                fieldErrors.dueDate = "dueDate cannot be empty.";
+            } else if (!DATE_PATTERN.test(dueDate)) {
+                fieldErrors.dueDate = "dueDate must be in YYYY-MM-DD format.";
+            }
+        }
+
+        if (hasAssignedStudents) {
+            if (!Array.isArray(payload.assignedStudents)) {
+                fieldErrors.assignedStudents = "assignedStudents must be an array.";
+            } else if (assignedStudentsInput.length === 0) {
+                fieldErrors.assignedStudents =
+                    "assignedStudents must include at least one student.";
+            }
+        }
+
+        const normalizedAssignedStudents = assignedStudentsInput
+            .map((item) => normalizeHomeworkStudentItem(item))
+            .filter((item): item is HomeworkStudentItem => item !== null);
+
+        if (hasAssignedStudents && Array.isArray(payload.assignedStudents)) {
+            if (normalizedAssignedStudents.length !== assignedStudentsInput.length) {
+                fieldErrors.assignedStudents =
+                    "Each assignedStudents item must include studentId and status.";
+            } else {
+                const studentIds = normalizedAssignedStudents.map((item) => item.studentId);
+                const hasDuplicates = new Set(studentIds).size !== studentIds.length;
+
+                if (hasDuplicates) {
+                    fieldErrors.assignedStudents =
+                        "assignedStudents contains duplicate studentId values.";
+                }
+            }
+        }
+
+        if (Object.keys(fieldErrors).length > 0) {
+            return NextResponse.json(
+                { message: "Validation failed.", fieldErrors },
+                { status: 400 },
+            );
+        }
+
+        const database = await getDatabase();
+        const schoolId = await resolveSchoolId(
+            database,
+            tokenPayload.uid,
+            tokenPayload.schoolId,
+        );
+
+        if (!schoolId) {
+            return NextResponse.json(
+                { message: "No school found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        const usersCollection = database.collection<TeacherDocument>(USERS_COLLECTION);
+        const classesCollection = database.collection<ClassDocument>(CLASSES_COLLECTION);
+        const studentsCollection = database.collection<StudentDocument>(
+            STUDENTS_COLLECTION,
+        );
+        const homeworkCollection = database.collection<HomeworkDocument>(HOMEWORK_COLLECTION);
+
+        const existingHomework = await homeworkCollection.findOne(
+            {
+                uid: homeworkUid,
+                organizationId: tokenPayload.uid,
+                ...buildSchoolScopeQuery(schoolId),
+            },
+            {
+                projection: {
+                    _id: 0,
+                    uid: 1,
+                    organizationId: 1,
+                    schoolId: 1,
+                    classId: 1,
+                    teacherId: 1,
+                    academicYear: 1,
+                    assignedDate: 1,
+                    dueDate: 1,
+                },
+            },
+        );
+
+        if (!existingHomework) {
+            return NextResponse.json(
+                { message: "Homework not found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        if (normalizeString(existingHomework.teacherId) !== teacherUid) {
+            return NextResponse.json(
+                { message: "You can only update your own homework records." },
+                { status: 403 },
+            );
+        }
+
+        const today = getTodayDateString();
+        const existingDueDate = normalizeString(existingHomework.dueDate);
+
+        if (DATE_PATTERN.test(existingDueDate) && today > existingDueDate) {
+            return NextResponse.json(
+                {
+                    message: "Homework cannot be updated after dueDate.",
+                    fieldErrors: {
+                        dueDate:
+                            "This homework is past due and can no longer be updated.",
+                    },
+                },
+                { status: 400 },
+            );
+        }
+
+        const teacher = await usersCollection.findOne(
+            {
+                uid: teacherUid,
+                role: "teacher",
+                organizationId: tokenPayload.uid,
+                ...buildSchoolScopeQuery(schoolId),
+            },
+            {
+                projection: {
+                    uid: 1,
+                    classIds: 1,
+                },
+            },
+        );
+
+        if (!teacher) {
+            return NextResponse.json(
+                { message: "Teacher not found for this organization." },
+                { status: 404 },
+            );
+        }
+
+        const classId = normalizeString(existingHomework.classId);
+        const classRecord = await classesCollection.findOne(
+            {
+                uid: classId,
+                organizationId: tokenPayload.uid,
+                ...buildSchoolScopeQuery(schoolId),
+            },
+            {
+                projection: {
+                    uid: 1,
+                    teacherId: 1,
+                    academicYear: 1,
+                },
+            },
+        );
+
+        if (!classRecord) {
+            return NextResponse.json(
+                {
+                    message: "Class not found for this organization.",
+                    fieldErrors: {
+                        classId: "No matching class found.",
+                    },
+                },
+                { status: 404 },
+            );
+        }
+
+        if (!canTeacherAccessClass(teacherUid, teacher.classIds, classRecord)) {
+            return NextResponse.json(
+                { message: "You do not have access to this class." },
+                { status: 403 },
+            );
+        }
+
+        if (
+            hasAcademicYear &&
+            classRecord.academicYear &&
+            normalizeString(classRecord.academicYear) !== academicYear
+        ) {
+            return NextResponse.json(
+                {
+                    message: "Validation failed.",
+                    fieldErrors: {
+                        academicYear: "academicYear must match the class academic year.",
+                    },
+                },
+                { status: 400 },
+            );
+        }
+
+        const nextAssignedDate = hasAssignedDate
+            ? assignedDate
+            : normalizeString(existingHomework.assignedDate);
+        const nextDueDate = hasDueDate ? dueDate : existingDueDate;
+
+        if (
+            DATE_PATTERN.test(nextAssignedDate) &&
+            DATE_PATTERN.test(nextDueDate) &&
+            !isDateOrderValid(nextAssignedDate, nextDueDate)
+        ) {
+            return NextResponse.json(
+                {
+                    message: "Validation failed.",
+                    fieldErrors: {
+                        dueDate: "dueDate must be the same as or after assignedDate.",
+                    },
+                },
+                { status: 400 },
+            );
+        }
+
+        if (hasAssignedStudents) {
+            const assignedStudentIds = normalizedAssignedStudents.map(
+                (item) => item.studentId,
+            );
+
+            const students = await studentsCollection
+                .find(
+                    {
+                        uid: { $in: assignedStudentIds },
+                        classId,
+                        organizationId: tokenPayload.uid,
+                        ...buildSchoolScopeQuery(schoolId),
+                    },
+                    {
+                        projection: {
+                            uid: 1,
+                        },
+                    },
+                )
+                .toArray();
+
+            const validStudentIdSet = new Set(students.map((student) => student.uid));
+            const invalidStudentIds = assignedStudentIds.filter(
+                (studentId) => !validStudentIdSet.has(studentId),
+            );
+
+            if (invalidStudentIds.length > 0) {
+                return NextResponse.json(
+                    {
+                        message: "Validation failed.",
+                        fieldErrors: {
+                            assignedStudents:
+                                "assignedStudents contains students outside the selected class.",
+                        },
+                        invalidStudentIds,
+                    },
+                    { status: 400 },
+                );
+            }
+        }
+
+        const updatePayload: Record<string, unknown> = {
+            updatedAt: new Date().toISOString(),
+        };
+
+        if (hasTitle) {
+            updatePayload.title = title;
+        }
+
+        if (hasDescription) {
+            updatePayload.description = description;
+        }
+
+        if (hasSubject) {
+            updatePayload.subject = subject;
+        }
+
+        if (hasAcademicYear) {
+            updatePayload.academicYear = academicYear;
+        }
+
+        if (hasAssignedDate) {
+            updatePayload.assignedDate = assignedDate;
+        }
+
+        if (hasDueDate) {
+            updatePayload.dueDate = dueDate;
+        }
+
+        if (hasAssignedStudents) {
+            updatePayload.assignedStudents = normalizedAssignedStudents;
+        }
+
+        await homeworkCollection.updateOne(
+            {
+                uid: homeworkUid,
+                organizationId: tokenPayload.uid,
+                ...buildSchoolScopeQuery(schoolId),
+            },
+            {
+                $set: updatePayload,
+            },
+        );
+
+        const updatedHomework = await homeworkCollection.findOne(
+            {
+                uid: homeworkUid,
+                organizationId: tokenPayload.uid,
+                ...buildSchoolScopeQuery(schoolId),
+            },
+            {
+                projection: {
+                    _id: 0,
+                },
+            },
+        );
+
+        return NextResponse.json({
+            message: "Homework updated successfully.",
+            homework: updatedHomework,
+        });
+    } catch (error) {
+        const message =
+            error instanceof Error
+                ? error.message
+                : "Unable to update homework.";
 
         return NextResponse.json({ message }, { status: 500 });
     }
