@@ -57,15 +57,18 @@ type HomeworkDocument = {
     createAt: string;
 };
 
-type HomeworkStudentResponseItem = {
-    uid: string;
-    name: string;
-    dob: string;
+type HomeworkFallbackStudentItem = {
+    studentId: string;
     enrollmentNumber: string;
-    classId: string;
-    organizationId: string;
-    status: string;
-    remarks: string;
+    status: HomeworkRecordStatus;
+};
+
+type HomeworkResponseDocument = Omit<
+    HomeworkDocument,
+    "assignedStudents" | "recordStatus"
+> & {
+    assignedStudents: HomeworkStudentItem[] | HomeworkFallbackStudentItem[];
+    recordStatus: HomeworkRecordStatus;
 };
 
 type CreateHomeworkPayload = {
@@ -100,9 +103,37 @@ const HOMEWORK_COLLECTION = "homework";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const RECORD_STATUS_PENDING: HomeworkRecordStatus = "pending";
 const RECORD_STATUS_COMPLETED: HomeworkRecordStatus = "completed";
+const STUDENT_STATUS_ASSIGNED = "assigned";
+const STUDENT_STATUS_COMPLETED = "completed";
 
 function normalizeString(value: unknown) {
     return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizePossiblyQuotedString(value: unknown) {
+    const normalized = normalizeString(value);
+
+    if (!normalized) {
+        return "";
+    }
+
+    const isWrappedInDoubleQuotes =
+        normalized.startsWith('"') && normalized.endsWith('"');
+    const isWrappedInSingleQuotes =
+        normalized.startsWith("'") && normalized.endsWith("'");
+
+    if (
+        (isWrappedInDoubleQuotes || isWrappedInSingleQuotes) &&
+        normalized.length >= 2
+    ) {
+        return normalized.slice(1, -1).trim();
+    }
+
+    return normalized;
+}
+
+function escapeRegExp(input: string) {
+    return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -194,31 +225,45 @@ function pickHomeworkStudents(homework: HomeworkDocument | null): HomeworkStuden
         .filter((candidate): candidate is HomeworkStudentItem => candidate !== null);
 }
 
-function buildHomeworkStudentResponse(
-    students: StudentDocument[],
+function buildHomeworkAssignedStudentsFromClass(
+    students: Array<Pick<StudentDocument, "uid" | "enrollmentNumber">>,
+) {
+    return students.map((student) => ({
+        studentId: student.uid,
+        enrollmentNumber: student.enrollmentNumber,
+        status: RECORD_STATUS_PENDING,
+    }));
+}
+
+function buildEmptyHomeworkRecord(
+    assignedStudents: HomeworkFallbackStudentItem[],
+): HomeworkResponseDocument {
+    return {
+        uid: "",
+        organizationId: "",
+        schoolId: "",
+        classId: "",
+        teacherId: "",
+        title: "",
+        description: "",
+        subject: "",
+        academicYear: "",
+        assignedDate: "",
+        assignedStudents,
+        dueDate: "",
+        recordStatus: RECORD_STATUS_PENDING,
+        createAt: "",
+    };
+}
+
+function updateHomeworkStudentStatus(
     assignedStudents: HomeworkStudentItem[],
-): HomeworkStudentResponseItem[] {
-    const statusAndRemarksByStudentId = new Map(
-        assignedStudents.map((item) => [
-            item.studentId,
-            { status: item.status, remarks: item.remarks },
-        ]),
-    );
-
-    return students.map((student) => {
-        const mapped = statusAndRemarksByStudentId.get(student.uid);
-
-        return {
-            uid: student.uid,
-            name: student.name,
-            dob: student.dob,
-            enrollmentNumber: student.enrollmentNumber,
-            classId: student.classId,
-            organizationId: student.organizationId,
-            status: mapped?.status ?? "pending",
-            remarks: mapped?.remarks ?? "",
-        };
-    });
+    status: string,
+): HomeworkStudentItem[] {
+    return assignedStudents.map((item) => ({
+        ...item,
+        status,
+    }));
 }
 
 export async function GET(request: NextRequest) {
@@ -233,9 +278,20 @@ export async function GET(request: NextRequest) {
         }
 
         const teacherUid = normalizeString(tokenPayload.userUid);
-        const classId = normalizeString(request.nextUrl.searchParams.get("classId"));
-        const teacherId = normalizeString(request.nextUrl.searchParams.get("teacherId"));
+        const classId =
+            normalizeString(request.nextUrl.searchParams.get("classId")) ||
+            normalizeString(request.nextUrl.searchParams.get("classUid"));
+        const teacherId =
+            normalizeString(request.nextUrl.searchParams.get("teacherId")) ||
+            normalizeString(request.nextUrl.searchParams.get("teacherUid"));
         const date = normalizeString(request.nextUrl.searchParams.get("date"));
+        const subject = normalizePossiblyQuotedString(
+            request.nextUrl.searchParams.get("subject"),
+        );
+        const homeworkUid =
+            normalizeString(request.nextUrl.searchParams.get("uid")) ||
+            normalizeString(request.nextUrl.searchParams.get("homeUid")) ||
+            normalizeString(request.nextUrl.searchParams.get("homeworkUid"));
 
         if (tokenPayload.role !== "teacher" || !teacherUid) {
             return NextResponse.json(
@@ -246,18 +302,24 @@ export async function GET(request: NextRequest) {
 
         const fieldErrors: Record<string, string> = {};
 
-        if (!classId) {
-            fieldErrors.classId = "classId is required.";
-        }
+        if (!homeworkUid) {
+            if (!classId) {
+                fieldErrors.classId = "classId is required.";
+            }
 
-        if (!teacherId) {
-            fieldErrors.teacherId = "teacherId is required.";
-        }
+            if (!teacherId) {
+                fieldErrors.teacherId = "teacherId is required.";
+            }
 
-        if (!date) {
-            fieldErrors.date = "date is required.";
-        } else if (!DATE_PATTERN.test(date)) {
-            fieldErrors.date = "date must be in YYYY-MM-DD format.";
+            if (!date) {
+                fieldErrors.date = "date is required.";
+            } else if (!DATE_PATTERN.test(date)) {
+                fieldErrors.date = "date must be in YYYY-MM-DD format.";
+            }
+
+            if (!subject) {
+                fieldErrors.subject = "subject is required.";
+            }
         }
 
         if (Object.keys(fieldErrors).length > 0) {
@@ -267,7 +329,7 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        if (teacherId !== teacherUid) {
+        if (!homeworkUid && teacherId !== teacherUid) {
             return NextResponse.json(
                 {
                     message: "You can only access your own homework records.",
@@ -299,6 +361,84 @@ export async function GET(request: NextRequest) {
             STUDENTS_COLLECTION,
         );
         const homeworkCollection = database.collection<HomeworkDocument>(HOMEWORK_COLLECTION);
+
+        if (homeworkUid) {
+            const homework = await homeworkCollection.findOne(
+                {
+                    uid: homeworkUid,
+                    teacherId: teacherUid,
+                    organizationId: tokenPayload.uid,
+                    ...buildSchoolScopeQuery(schoolId),
+                },
+                {
+                    projection: {
+                        _id: 0,
+                        uid: 1,
+                        organizationId: 1,
+                        schoolId: 1,
+                        classId: 1,
+                        teacherId: 1,
+                        title: 1,
+                        description: 1,
+                        subject: 1,
+                        academicYear: 1,
+                        assignedDate: 1,
+                        assignedStudents: 1,
+                        dueDate: 1,
+                        recordStatus: 1,
+                        createAt: 1,
+                    },
+                },
+            );
+
+            if (!homework) {
+                return NextResponse.json(
+                    {
+                        message: "Homework not found for this teacher.",
+                        fieldErrors: {
+                            uid: "No matching homework found.",
+                        },
+                    },
+                    { status: 404 },
+                );
+            }
+
+            const classRecord = await classesCollection.findOne(
+                {
+                    uid: homework.classId,
+                    organizationId: tokenPayload.uid,
+                    ...buildSchoolScopeQuery(schoolId),
+                },
+                {
+                    projection: {
+                        uid: 1,
+                        className: 1,
+                        section: 1,
+                    },
+                },
+            );
+
+            const classSummary = classRecord
+                ? buildClassSummary(classRecord)
+                : {
+                      classId: homework.classId,
+                      className: "",
+                      section: "",
+                  };
+
+            const homeworkWithRecordStatus: HomeworkResponseDocument = {
+                ...homework,
+                assignedStudents: pickHomeworkStudents(homework),
+                recordStatus: normalizeHomeworkRecordStatus(homework.recordStatus),
+            };
+
+            return NextResponse.json({
+                source: "homework",
+                class: classSummary,
+                date: homework.assignedDate,
+                homework: homeworkWithRecordStatus,
+            });
+        }
 
         const teacher = await usersCollection.findOne(
             {
@@ -363,6 +503,7 @@ export async function GET(request: NextRequest) {
                 classId,
                 teacherId,
                 assignedDate: date,
+                subject: { $regex: new RegExp(`^${escapeRegExp(subject)}$`, "i") },
                 ...buildSchoolScopeQuery(schoolId),
             },
             {
@@ -389,6 +530,23 @@ export async function GET(request: NextRequest) {
             },
         );
 
+        const classSummary = buildClassSummary(classRecord);
+
+        if (homework) {
+            const homeworkWithRecordStatus: HomeworkResponseDocument = {
+                ...homework,
+                assignedStudents: pickHomeworkStudents(homework),
+                recordStatus: normalizeHomeworkRecordStatus(homework.recordStatus),
+            };
+
+            return NextResponse.json({
+                source: "homework",
+                class: classSummary,
+                date,
+                homework: homeworkWithRecordStatus,
+            });
+        }
+
         const students = await studentsCollection
             .find(
                 {
@@ -400,45 +558,22 @@ export async function GET(request: NextRequest) {
                     projection: {
                         _id: 0,
                         uid: 1,
-                        name: 1,
-                        dob: 1,
                         enrollmentNumber: 1,
-                        classId: 1,
-                        organizationId: 1,
                     },
                 },
             )
             .sort({ enrollmentNumber: 1 })
             .toArray();
 
-        const classSummary = buildClassSummary(classRecord);
-        const assignedStudents = pickHomeworkStudents(homework);
-        const homeworkStudents = buildHomeworkStudentResponse(
-            students,
-            assignedStudents,
+        const emptyHomework = buildEmptyHomeworkRecord(
+            buildHomeworkAssignedStudentsFromClass(students),
         );
-
-        if (homework) {
-            const homeworkWithRecordStatus = {
-                ...homework,
-                recordStatus: normalizeHomeworkRecordStatus(homework.recordStatus),
-            };
-
-            return NextResponse.json({
-                source: "homework",
-                class: classSummary,
-                date,
-                homework: homeworkWithRecordStatus,
-                assignedStudents: homeworkStudents,
-            });
-        }
 
         return NextResponse.json({
             source: "students",
             class: classSummary,
             date,
-            homework: null,
-            assignedStudents: homeworkStudents,
+            homework: emptyHomework,
         });
     } catch (error) {
         const message =
@@ -543,6 +678,10 @@ export async function POST(request: Request) {
         const normalizedAssignedStudents = assignedStudentsInput
             .map((item) => normalizeHomeworkStudentItem(item))
             .filter((item): item is HomeworkStudentItem => item !== null);
+        const postAssignedStudents = updateHomeworkStudentStatus(
+            normalizedAssignedStudents,
+            STUDENT_STATUS_ASSIGNED,
+        );
 
         if (Array.isArray(payload.assignedStudents)) {
             if (normalizedAssignedStudents.length !== assignedStudentsInput.length) {
@@ -669,7 +808,7 @@ export async function POST(request: Request) {
             );
         }
 
-        const assignedStudentIds = normalizedAssignedStudents.map(
+        const assignedStudentIds = postAssignedStudents.map(
             (item) => item.studentId,
         );
 
@@ -719,7 +858,7 @@ export async function POST(request: Request) {
             subject,
             academicYear,
             assignedDate,
-            assignedStudents: normalizedAssignedStudents,
+            assignedStudents: postAssignedStudents,
             dueDate,
             recordStatus: RECORD_STATUS_PENDING,
             createAt: new Date().toISOString(),
@@ -931,6 +1070,7 @@ export async function PUT(request: Request) {
                     academicYear: 1,
                     assignedDate: 1,
                     dueDate: 1,
+                    assignedStudents: 1,
                 },
             },
         );
@@ -1129,9 +1269,16 @@ export async function PUT(request: Request) {
             updatePayload.dueDate = dueDate;
         }
 
-        if (hasAssignedStudents) {
-            updatePayload.assignedStudents = normalizedAssignedStudents;
-        }
+        const putAssignedStudents = hasAssignedStudents
+            ? updateHomeworkStudentStatus(
+                  normalizedAssignedStudents,
+                  STUDENT_STATUS_COMPLETED,
+              )
+            : updateHomeworkStudentStatus(
+                  pickHomeworkStudents(existingHomework),
+                  STUDENT_STATUS_COMPLETED,
+              );
+        updatePayload.assignedStudents = putAssignedStudents;
 
         await homeworkCollection.updateOne(
             {
