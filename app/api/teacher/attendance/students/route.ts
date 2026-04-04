@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type { ObjectId } from "mongodb";
 import { type NextRequest, NextResponse } from "next/server";
 import { buildSchoolScopeQuery, resolveSchoolId } from "@/lib/organization-school";
+import { enqueueAttendanceNotifications } from "@/lib/notifications/attendance";
 import { getDatabase } from "@/lib/mongodb";
 import { verifyAccessToken } from "@/lib/verify-access-token";
 
@@ -30,9 +32,12 @@ type StudentDocument = {
     enrollmentNumber: string;
     organizationId: string;
     dob: string;
+    parentId: string;
+    schoolId?: string;
 };
 
 type AttendanceDocument = {
+    _id?: ObjectId;
     uid?: string;
     date?: string | Date;
     classId: string;
@@ -374,6 +379,7 @@ export async function GET(request: NextRequest) {
                         enrollmentNumber: 1,
                         organizationId: 1,
                         dob: 1,
+                        parentId: 1,
                     },
                 },
             )
@@ -664,6 +670,7 @@ export async function POST(request: NextRequest) {
                         enrollmentNumber: 1,
                         organizationId: 1,
                         dob: 1,
+                        parentId: 1,
                     },
                 },
             )
@@ -711,8 +718,10 @@ export async function POST(request: NextRequest) {
             ),
             {
                 projection: {
+                    _id: 1,
                     uid: 1,
                     createdAt: 1,
+                    studentAttendance: 1,
                 },
                 sort: {
                     createdAt: -1,
@@ -740,6 +749,26 @@ export async function POST(request: NextRequest) {
             );
         } else {
             await attendanceCollection.insertOne(attendanceDocument);
+        }
+
+        try {
+            await enqueueAttendanceNotifications({
+                database,
+                attendanceUid: attendanceDocument.uid ?? "",
+                organizationId: tokenPayload.uid,
+                schoolId,
+                classId,
+                date,
+                previousAttendanceItems: pickAttendanceStudents(existingAttendance),
+                nextAttendanceItems: normalizedAttendanceItems,
+                students: students.map((student) => ({
+                    uid: student.uid,
+                    name: student.name,
+                    parentId: student.parentId,
+                })),
+            });
+        } catch (notificationError) {
+            console.error("Failed to queue attendance notifications", notificationError);
         }
 
         return NextResponse.json(
